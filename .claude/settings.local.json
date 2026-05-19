@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Directory)",
+      "Bash(Select-Object Name)",
+      "Bash(xargs grep -l \"ref_audio\\\\|reference audio\\\\|voice clone\")",
+      "Bash(index\")",
+      "Bash(Get-ChildItem -Path \"D:\\\\Projects\\\\Pixelle-Video\" -Directory)",
+      "PowerShell(head *)",
+      "Bash(Get-ChildItem -Path \"D:\\\\Projects\\\\Pixelle-Video\" -Recurse -Depth 2)",
+      "Bash(Select-Object FullName)",
+      "Bash(Get-ChildItem *)",
+      "WebSearch",
+      "WebFetch(domain:docs.claude.com)",
+      "PowerShell(Get-Command *)",
+      "PowerShell(& .venv\\\\Scripts\\\\python.exe -c \"from web.pipelines import get_all_pipeline_uis; from web.i18n import tr; ps=get_all_pipeline_uis\\(\\); print\\('ORDER:', [\\(p.name,p.icon\\) for p in ps]\\); print\\('TAB0:', ps[0].display_name, '|', ps[0].description\\); print\\('WORDCOUNT:', tr\\('story_shortener.word_count', count=200\\)\\); print\\('ERR:', tr\\('story_shortener.error', error='test'\\)\\)\")",
+      "PowerShell(& .venv\\\\Scripts\\\\python.exe -X utf8 -c \"from web.pipelines import get_all_pipeline_uis; from web.i18n import tr; ps=get_all_pipeline_uis\\(\\); print\\('ORDER:', [\\(p.name,p.icon\\) for p in ps]\\); print\\('TAB0 name:', ps[0].display_name\\); print\\('TAB0 desc:', ps[0].description\\); print\\('WORDCOUNT:', tr\\('story_shortener.word_count', count=200\\)\\); print\\('ERR:', tr\\('story_shortener.error', error='test'\\)\\)\")",
+      "PowerShell(& .venv\\\\Scripts\\\\python.exe -X utf8 \"C:\\\\Users\\\\nguye\\\\AppData\\\\Local\\\\Temp\\\\pv_story_test.py\")",
+      "PowerShell(& .venv\\\\Scripts\\\\python.exe -X utf8 -c \"import json; json.load\\(open\\('web/i18n/locales/en_US.json',encoding='utf-8'\\)\\); json.load\\(open\\('web/i18n/locales/zh_CN.json',encoding='utf-8'\\)\\); print\\('JSON OK'\\); from web.i18n import tr; print\\('EN:', tr\\('story_shortener.word_count', count=290\\)\\)\")",
+      "PowerShell(& .venv\\\\Scripts\\\\python.exe -X utf8 -c \"import json; json.load\\(open\\('web/i18n/locales/en_US.json',encoding='utf-8'\\)\\); json.load\\(open\\('web/i18n/locales/zh_CN.json',encoding='utf-8'\\)\\); print\\('JSON OK'\\); from web.pipelines import get_all_pipeline_uis; from web.i18n import tr; ps=get_all_pipeline_uis\\(\\); print\\('ORDER:', [p.name for p in ps]\\); print\\('copy_btn:', tr\\('story_shortener.copy_btn'\\)\\); print\\('copied:', tr\\('story_shortener.copied'\\)\\); print\\('title_label:', tr\\('story_shortener.title_label'\\)\\); print\\('shorten_btn:', tr\\('story_shortener.shorten_btn'\\)\\); print\\('word_count:', tr\\('story_shortener.word_count', count=360\\)\\)\")",
+      "PowerShell(& .venv\\\\Scripts\\\\python.exe -X utf8 \"C:\\\\Users\\\\nguye\\\\AppData\\\\Local\\\\Temp\\\\pv_story_test2.py\")",
+      "PowerShell(Remove-Item *)"
+    ]
+  }
+}

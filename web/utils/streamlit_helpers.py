@@ -14,6 +14,8 @@
 Streamlit helper functions
 """
 
+import json
+
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -94,4 +96,90 @@ def _show_js_alert(workflow_path: str):
     """
     
     components.html(js_code, height=0, width=0)
+
+
+# ============================================================================
+# Copy to Clipboard Button - Native HTML/JS button
+# ============================================================================
+# Streamlit has no native copy-to-clipboard button, so we render a small HTML
+# button inside a component iframe (same approach as the JS alert above).
+
+def render_copy_button(text: str, label: str, copied_label: str, height: int = 48):
+    """
+    Render an HTML "copy to clipboard" button.
+
+    Uses navigator.clipboard with a document.execCommand fallback so it works
+    reliably inside Streamlit's component iframe. The button briefly shows
+    `copied_label` after a successful copy.
+
+    Args:
+        text: The text placed on the clipboard when the button is clicked.
+        label: The button's normal label.
+        copied_label: The label shown briefly after a successful copy.
+        height: Height of the component iframe, in pixels.
+    """
+    # JSON-encode for safe JS embedding; neutralize "</script>" breakout.
+    text_js = json.dumps(text).replace("<", "\\u003c")
+    label_js = json.dumps(label).replace("<", "\\u003c")
+    copied_js = json.dumps(copied_label).replace("<", "\\u003c")
+
+    html = """
+    <style>
+      html, body { margin: 0; padding: 0; }
+      .pv-copy-btn {
+        width: 100%; padding: 0.5rem 1rem; margin: 0;
+        font-size: 0.95rem; font-weight: 400;
+        font-family: "Source Sans Pro", sans-serif;
+        border: 1px solid rgba(49, 51, 63, 0.2); border-radius: 0.5rem;
+        background: #ffffff; color: rgb(49, 51, 63); cursor: pointer;
+        transition: border-color 0.15s, color 0.15s;
+      }
+      .pv-copy-btn:hover { border-color: #ff4b4b; color: #ff4b4b; }
+      .pv-copy-btn:active { background: #f0f2f6; }
+    </style>
+    <button class="pv-copy-btn" id="pvCopyBtn"></button>
+    <script>
+      (function () {
+        var btn = document.getElementById("pvCopyBtn");
+        var label = __LABEL__;
+        var copiedLabel = __COPIED__;
+        var text = __TEXT__;
+        btn.textContent = label;
+        function fallbackCopy(t) {
+          var ta = document.createElement("textarea");
+          ta.value = t;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          var ok = false;
+          try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+          document.body.removeChild(ta);
+          return ok;
+        }
+        function flash() {
+          btn.textContent = copiedLabel;
+          setTimeout(function () { btn.textContent = label; }, 1800);
+        }
+        btn.addEventListener("click", function () {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(flash, function () {
+              if (fallbackCopy(text)) flash();
+            });
+          } else {
+            if (fallbackCopy(text)) flash();
+          }
+        });
+      })();
+    </script>
+    """
+    # Replace __TEXT__ last so user-controlled content cannot inject placeholders.
+    html = (
+        html
+        .replace("__LABEL__", label_js)
+        .replace("__COPIED__", copied_js)
+        .replace("__TEXT__", text_js)
+    )
+    components.html(html, height=height)
 
