@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="template:media-width" content="1024">
+    <meta name="template:media-height" content="1024">
+    <meta name="viewport" content="width=1080, height=1920">
+    <title>Memoir - 1080x1920</title>
+
+    <!-- Google Fonts: Caveat (handwritten cursive) + Lora (humanist serif).
+         Both ship Vietnamese diacritic coverage on Google Fonts. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600;700&family=Lora:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap"
+        rel="stylesheet">
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            width: 1080px;
+            height: 1920px;
+            overflow: hidden;
+        }
+
+        body {
+            position: relative;
+            font-family: 'Lora', 'Georgia', serif;
+            color: #3D2E1F;
+            background: #F5EDDC;
+            /* Very subtle warm vignette toward sepia at the edges. */
+            background-image:
+                radial-gradient(ellipse at center,
+                    rgba(255, 255, 255, 0.35) 0%,
+                    rgba(193, 166, 123, 0.18) 100%);
+        }
+
+        /* ===== Title block (scene 1 only) ===== */
+        .title {
+            position: absolute;
+            top: 130px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            z-index: 2;
+        }
+
+        .title-text {
+            font-family: 'Caveat', 'Brush Script MT', cursive;
+            font-size: 108px;
+            font-weight: 700;
+            color: #5C4631;
+            line-height: 1.1;
+            letter-spacing: 1px;
+            padding: 0 80px;
+        }
+
+        .title-ornament {
+            margin: 24px auto 0;
+            width: 120px;
+            height: 2px;
+            background: #8B7355;
+            opacity: 0.7;
+        }
+
+        /* ===== Image block ===== */
+        .image-wrap {
+            position: absolute;
+            top: 400px;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: center;
+            z-index: 1;
+        }
+
+        .image-frame {
+            width: 920px;
+            height: 920px;
+            background: #FFFFFF;
+            padding: 14px;
+            border-radius: 8px;
+            box-shadow:
+                0 12px 40px rgba(92, 70, 49, 0.25),
+                0 2px 6px rgba(92, 70, 49, 0.15);
+        }
+
+        .image-frame img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 4px;
+            display: block;
+        }
+
+        /* ===== Body text (the paragraph for this scene) ===== */
+        .text {
+            position: absolute;
+            top: 1380px;
+            left: 100px;
+            right: 100px;
+            font-family: 'Lora', 'Georgia', serif;
+            font-size: 46px;
+            line-height: 1.65;
+            color: #3D2E1F;
+            text-align: justify;
+            text-indent: 1.6em;
+            white-space: pre-line;
+            letter-spacing: 0.3px;
+            z-index: 1;
+        }
+
+        /* ===== Signature ===== */
+        .signature {
+            position: absolute;
+            bottom: 50px;
+            right: 70px;
+            font-family: 'Caveat', cursive;
+            font-size: 38px;
+            color: #8B7355;
+            letter-spacing: 1px;
+            z-index: 2;
+        }
+
+        /* ===== Scenes 2–6: hide title, shift image and text up so the
+                 layout doesn't feel top-heavy without the title. ===== */
+        body.no-title .title {
+            display: none;
+        }
+
+        body.no-title .image-wrap {
+            top: 240px;
+        }
+
+        body.no-title .text {
+            top: 1220px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="title">
+        <div class="title-text">{{title}}</div>
+        <div class="title-ornament"></div>
+    </div>
+
+    <div class="image-wrap">
+        <div class="image-frame">
+            <img src="{{image}}" alt="Scene image">
+        </div>
+    </div>
+
+    <div class="text">{{text}}</div>
+
+    <div class="signature">{{signature=Pixelle.AI}}</div>
+
+    <script>
+        // Hide the title from scene 2 onward (same trick as image_healing.html).
+        const index = Number("{{index}}");
+        document.addEventListener('DOMContentLoaded', () => {
+            if (index > 1) document.body.classList.add('no-title');
+        });
+    </script>
+</body>
+
+</html>

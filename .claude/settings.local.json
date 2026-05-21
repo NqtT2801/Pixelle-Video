@@ -19,7 +19,13 @@
       "PowerShell(& .venv\\\\Scripts\\\\python.exe -X utf8 -c \"import json; json.load\\(open\\('web/i18n/locales/en_US.json',encoding='utf-8'\\)\\); json.load\\(open\\('web/i18n/locales/zh_CN.json',encoding='utf-8'\\)\\); print\\('JSON OK'\\); from web.i18n import tr; print\\('EN:', tr\\('story_shortener.word_count', count=290\\)\\)\")",
       "PowerShell(& .venv\\\\Scripts\\\\python.exe -X utf8 -c \"import json; json.load\\(open\\('web/i18n/locales/en_US.json',encoding='utf-8'\\)\\); json.load\\(open\\('web/i18n/locales/zh_CN.json',encoding='utf-8'\\)\\); print\\('JSON OK'\\); from web.pipelines import get_all_pipeline_uis; from web.i18n import tr; ps=get_all_pipeline_uis\\(\\); print\\('ORDER:', [p.name for p in ps]\\); print\\('copy_btn:', tr\\('story_shortener.copy_btn'\\)\\); print\\('copied:', tr\\('story_shortener.copied'\\)\\); print\\('title_label:', tr\\('story_shortener.title_label'\\)\\); print\\('shorten_btn:', tr\\('story_shortener.shorten_btn'\\)\\); print\\('word_count:', tr\\('story_shortener.word_count', count=360\\)\\)\")",
       "PowerShell(& .venv\\\\Scripts\\\\python.exe -X utf8 \"C:\\\\Users\\\\nguye\\\\AppData\\\\Local\\\\Temp\\\\pv_story_test2.py\")",
-      "PowerShell(Remove-Item *)"
+      "PowerShell(Remove-Item *)",
+      "Bash(Select-Object FullName, Length)",
+      "Bash(Sort-Object FullName)",
+      "PowerShell(& .venv\\\\Scripts\\\\python.exe -X utf8 -c \"from pixelle_video.utils.template_util import get_templates_grouped_by_size_and_type; g = get_templates_grouped_by_size_and_type\\('image'\\); names = sorted\\(t.name for t in g.get\\('1080x1920', []\\)\\); print\\('memoir present:', 'image_memoir.html' in names\\); print\\('1080x1920 image templates:'\\); [print\\(' ', n\\) for n in names]\")",
+      "PowerShell(& .venv\\\\Scripts\\\\python.exe -X utf8 -c \"from pixelle_video.utils.template_util import get_templates_grouped_by_size_and_type; g = get_templates_grouped_by_size_and_type\\('image'\\); items = g.get\\('1080x1920', []\\); print\\('count:', len\\(items\\)\\); print\\('first item fields:', items[0].model_dump\\(\\) if items else 'none'\\); print\\('all:', [it.model_dump\\(\\) for it in items[:3]]\\)\")",
+      "PowerShell(& .venv\\\\Scripts\\\\python.exe -X utf8 -c \"from pixelle_video.utils.template_util import get_templates_grouped_by_size_and_type; g = get_templates_grouped_by_size_and_type\\('image'\\); items = g.get\\('1080x1920', []\\); names = sorted\\(it.display_info.name for it in items\\); print\\('count:', len\\(names\\)\\); print\\('memoir present:', 'image_memoir.html' in names\\); print\\('templates:'\\); [print\\(' ', n\\) for n in names]\")",
+      "PowerShell(& .venv\\\\Scripts\\\\python.exe -X utf8 \"C:\\\\Users\\\\nguye\\\\AppData\\\\Local\\\\Temp\\\\pv_render_memoir.py\")"
     ]
   }
 }
