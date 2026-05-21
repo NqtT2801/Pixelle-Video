@@ -25,7 +25,8 @@
       "PowerShell(& .venv\\\\Scripts\\\\python.exe -X utf8 -c \"from pixelle_video.utils.template_util import get_templates_grouped_by_size_and_type; g = get_templates_grouped_by_size_and_type\\('image'\\); names = sorted\\(t.name for t in g.get\\('1080x1920', []\\)\\); print\\('memoir present:', 'image_memoir.html' in names\\); print\\('1080x1920 image templates:'\\); [print\\(' ', n\\) for n in names]\")",
       "PowerShell(& .venv\\\\Scripts\\\\python.exe -X utf8 -c \"from pixelle_video.utils.template_util import get_templates_grouped_by_size_and_type; g = get_templates_grouped_by_size_and_type\\('image'\\); items = g.get\\('1080x1920', []\\); print\\('count:', len\\(items\\)\\); print\\('first item fields:', items[0].model_dump\\(\\) if items else 'none'\\); print\\('all:', [it.model_dump\\(\\) for it in items[:3]]\\)\")",
       "PowerShell(& .venv\\\\Scripts\\\\python.exe -X utf8 -c \"from pixelle_video.utils.template_util import get_templates_grouped_by_size_and_type; g = get_templates_grouped_by_size_and_type\\('image'\\); items = g.get\\('1080x1920', []\\); names = sorted\\(it.display_info.name for it in items\\); print\\('count:', len\\(names\\)\\); print\\('memoir present:', 'image_memoir.html' in names\\); print\\('templates:'\\); [print\\(' ', n\\) for n in names]\")",
-      "PowerShell(& .venv\\\\Scripts\\\\python.exe -X utf8 \"C:\\\\Users\\\\nguye\\\\AppData\\\\Local\\\\Temp\\\\pv_render_memoir.py\")"
+      "PowerShell(& .venv\\\\Scripts\\\\python.exe -X utf8 \"C:\\\\Users\\\\nguye\\\\AppData\\\\Local\\\\Temp\\\\pv_render_memoir.py\")",
+      "PowerShell(& .venv\\\\Scripts\\\\python.exe -X utf8 -c \"import yaml; cfg = yaml.safe_load\\(open\\('config.yaml','r',encoding='utf-8'\\)\\); print\\('image:', cfg['comfyui']['image']['prompt_prefix']\\); print\\('video:', cfg['comfyui']['video']['prompt_prefix']\\)\")"
     ]
   }
 }
