@@ -60,6 +60,10 @@
             line-height: 1.1;
             letter-spacing: 1px;
             padding: 0 80px;
+            max-height: 220px;
+            overflow-wrap: break-word;
+            word-break: break-word;
+            overflow: hidden;
         }
 
         .title-ornament {
@@ -165,7 +169,24 @@
         // Hide the title from scene 2 onward (same trick as image_healing.html).
         const index = Number("{{index}}");
         document.addEventListener('DOMContentLoaded', () => {
-            if (index > 1) document.body.classList.add('no-title');
+            if (index > 1) {
+                document.body.classList.add('no-title');
+                return;
+            }
+
+            // Auto-shrink title font-size so long titles don't overlap the image.
+            // Available space between title (top:130px) and image (top:400px) ~= 270px,
+            // minus ornament margin/height (~26px) leaves ~244px for text.
+            const titleText = document.querySelector('.title-text');
+            if (!titleText) return;
+            const maxHeight = 220;
+            const minFontSize = 48;
+            let fontSize = 108;
+            titleText.style.fontSize = fontSize + 'px';
+            while (titleText.scrollHeight > maxHeight && fontSize > minFontSize) {
+                fontSize -= 4;
+                titleText.style.fontSize = fontSize + 'px';
+            }
         });
     </script>
 </body>
