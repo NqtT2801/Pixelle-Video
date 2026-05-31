@@ -68,7 +68,7 @@ def render_style_config(pixelle_video):
             
             # Get saved voice from config
             local_config = tts_config.get("local", {})
-            saved_voice = local_config.get("voice", "zh-CN-YunjianNeural")
+            saved_voice = local_config.get("voice", "vi-VN-HoaiMyNeural")
             saved_speed = local_config.get("speed", 1.2)
             
             # Build voice options with i18n
@@ -340,7 +340,7 @@ def render_style_config(pixelle_video):
         # Determine type-specific default template
         type_default_templates = {
             'static': '1080x1920/static_default.html',
-            'image': '1080x1920/image_default.html',
+            'image': '1080x1920/image_memoir.html',
             'video': '1080x1920/video_default.html'
         }
         type_specific_default = type_default_templates.get(selected_template_type, config_default_template)

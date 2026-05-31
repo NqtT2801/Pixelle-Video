@@ -33,7 +33,7 @@ class ClaudeCliError(Exception):
 
 
 class ShortenedStory(NamedTuple):
-    """A shortened narrative: an AI-suggested title and the 6-paragraph summary."""
+    """A shortened narrative: an AI-suggested title and the 10-paragraph summary."""
     title: str
     summary: str
 
@@ -45,17 +45,17 @@ class ShortenedStory(NamedTuple):
 _SUMMARIZE_PROMPT = """You will receive a person's first-person narrative recounting their life circumstances and story.
 
 Rewrite it as a condensed version. Rules:
-- Target ~250 words; do not exceed 265.
-- Structure the condensed version as EXACTLY 6 paragraphs separated by a blank line, with the content distributed evenly across the 6 paragraphs.
+- Target ~420 words; do not exceed 445.
+- Structure the condensed version as EXACTLY 10 paragraphs separated by a blank line, with the content distributed evenly across the 10 paragraphs.
 - Stay in the first person and preserve the narrator's original voice, tone and writing style — do not turn it into a neutral report.
-- Each paragraph must be coherent, and the 6 paragraphs together must read as one well-connected story that any reader can easily follow and understand.
+- Each paragraph must be coherent, and the 10 paragraphs together must read as one well-connected story that any reader can easily follow and understand.
 - Keep the essential events, emotions and circumstances; remove only repetition and minor detail.
 - Write in the SAME language as the input narrative.
 
 Output format — follow it EXACTLY and output nothing else:
 - The first line must be `TITLE: ` followed by a short, evocative title (at most ~10 words, same language as the input, no quotes).
 - Then one empty line.
-- Then the condensed version: exactly 6 paragraphs separated by one empty line, with no heading, labels, quotes or numbering."""
+- Then the condensed version: exactly 10 paragraphs separated by one empty line, with no heading, labels, quotes or numbering."""
 
 _TITLE_PREFIX = "TITLE:"
 
@@ -66,7 +66,7 @@ def is_claude_available() -> bool:
 
 
 def _split_title_and_summary(output: str) -> ShortenedStory:
-    """Parse the `TITLE:` first line; the remainder is the 6-paragraph summary."""
+    """Parse the `TITLE:` first line; the remainder is the 10-paragraph summary."""
     text = (output or "").strip()
     title = ""
     summary = text
@@ -87,7 +87,7 @@ def summarize_story(narrative: str, timeout: int = 240) -> ShortenedStory:
     Condense a first-person life narrative via the Claude Code CLI.
 
     Runs the logged-in Claude Code subscription (Sonnet, medium effort) and
-    returns a title plus a ~250-word, 6-paragraph summary that preserves the
+    returns a title plus a ~420-word, 10-paragraph summary that preserves the
     narrator's voice and the input language.
 
     Args:

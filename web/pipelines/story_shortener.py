@@ -14,8 +14,8 @@
 Story Shortener Pipeline UI
 
 A standalone text tool: paste a person's first-person life narrative and the
-Claude Code subscription condenses it into a title plus a coherent 6-paragraph
-summary (~250 words) that preserves the narrator's original voice.
+Claude Code subscription condenses it into a title plus a coherent 10-paragraph
+summary (~420 words) that preserves the narrator's original voice.
 """
 
 from typing import Any
@@ -83,7 +83,7 @@ class StoryShortenerPipelineUI(PipelineUI):
                                 st.error(tr("story_shortener.error", error=str(e)))
 
         # ====================================================================
-        # Right Column: Title + shortened 6-paragraph result (editable)
+        # Right Column: Title + shortened 10-paragraph result (editable)
         # ====================================================================
         with right_col:
             with st.container(border=True):
@@ -104,7 +104,7 @@ class StoryShortenerPipelineUI(PipelineUI):
                     st.caption(
                         tr("story_shortener.word_count", count=len(edited.split()))
                     )
-                    # Copy button copies the (edited) 6-paragraph summary only.
+                    # Copy button copies the (edited) 10-paragraph summary only.
                     render_copy_button(
                         edited,
                         tr("story_shortener.copy_btn"),
