@@ -14,6 +14,8 @@ dependencies = [
     "loguru>=0.7.0",
     "pyyaml>=6.0.0",
     "edge-tts==7.2.7",
+    # VietVoice-TTS: local/offline natural Vietnamese voices (Northern/Central/Southern, male & female)
+    "vietvoicetts[cpu] @ git+https://github.com/nguyenvulebinh/VietVoice-TTS.git",
     "certifi>=2025.10.5",
     "ffmpeg-python>=0.2.0",
     "httpx>=0.28.1",
@@ -39,6 +41,10 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# Allow the VietVoice-TTS git/direct-reference dependency in project.dependencies
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.ruff]
 line-length = 100

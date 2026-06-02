@@ -255,6 +255,8 @@
     "tts.voice.es-ES-ElviraNeural": "ES 女声-友好（埃尔维拉）",
     "tts.voice.vi-VN-HoaiMyNeural": "VN 女声-友好（怀美）",
     "tts.voice.vi-VN-NamMinhNeural": "VN 男声-友好（南明）",
+    "tts.voice.vietvoice-vi-bac-nu": "VN 女声-北部自然（河内·VietVoice）",
+    "tts.voice.vietvoice-vi-bac-nam": "VN 男声-北部自然（河内·VietVoice）",
     "tts.selector": "工作流选择",
     "tts.what": "将旁白文本转换为真人般的自然语音（部分工作流支持参考音频克隆声音）",
     "tts.how": "将导出的 tts_xxx.json 工作流文件（API格式）放入 workflows/selfhost/（本地 ComfyUI）或 workflows/runninghub/（云端）文件夹",
