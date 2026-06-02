@@ -301,7 +301,7 @@ def render_style_config(pixelle_video):
             tr('template.type_selector'),
             options=list(template_type_options.keys()),
             format_func=lambda x: template_type_options[x],
-            index=1,  # Default to 'image'
+            index=2,  # Default to 'video'
             key="template_type_selector",
             label_visibility="collapsed",
             horizontal=True
@@ -341,7 +341,7 @@ def render_style_config(pixelle_video):
         type_default_templates = {
             'static': '1080x1920/static_default.html',
             'image': '1080x1920/image_memoir.html',
-            'video': '1080x1920/video_default.html'
+            'video': '1080x1920/video_minimalist_cartoon.html'
         }
         type_specific_default = type_default_templates.get(selected_template_type, config_default_template)
         
