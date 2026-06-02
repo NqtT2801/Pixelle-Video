@@ -22,6 +22,15 @@ from web.utils.async_helpers import get_project_version
 
 def render_content_input():
     """Render content input section (left column) with batch support"""
+    # Hand off any pending content pushed from other tabs (e.g. Story Shortener)
+    # into the widget-backed session keys BEFORE the widgets instantiate.
+    for pending_key, target_key in (
+        ("_pending_quick_create_text", "quick_create_text"),
+        ("_pending_quick_create_title", "quick_create_title"),
+    ):
+        if pending_key in st.session_state:
+            st.session_state[target_key] = st.session_state.pop(pending_key)
+
     with st.container(border=True):
         st.markdown(f"**{tr('section.content_input')}**")
         
@@ -57,7 +66,8 @@ def render_content_input():
                 tr("input.text"),
                 placeholder=text_placeholder,
                 height=text_height,
-                help=text_help
+                help=text_help,
+                key="quick_create_text",
             )
             
             # Split mode selector (only show in fixed mode)
@@ -81,7 +91,8 @@ def render_content_input():
             title = st.text_input(
                 tr("input.title"),
                 placeholder=tr("input.title_placeholder"),
-                help=tr("input.title_help")
+                help=tr("input.title_help"),
+                key="quick_create_title",
             )
             
             # Number of scenes (only show in generate mode)

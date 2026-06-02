@@ -75,12 +75,17 @@ class StoryShortenerPipelineUI(PipelineUI):
                     else:
                         with st.spinner(tr("story_shortener.spinner")):
                             try:
-                                st.session_state["story_shortener_result"] = (
-                                    summarize_story(narrative.strip())
-                                )
+                                result = summarize_story(narrative.strip())
+                                st.session_state["story_shortener_result"] = result
+                                # Push result into Quick Create's content input on the
+                                # next run, before its widgets instantiate.
+                                st.session_state["_pending_quick_create_text"] = result.summary
+                                st.session_state["_pending_quick_create_title"] = result.title or ""
                             except Exception as e:
                                 st.session_state.pop("story_shortener_result", None)
                                 st.error(tr("story_shortener.error", error=str(e)))
+                            else:
+                                st.rerun()
 
         # ====================================================================
         # Right Column: Title + shortened 10-paragraph result (editable)
