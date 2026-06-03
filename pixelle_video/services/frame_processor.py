@@ -419,19 +419,46 @@ class FrameProcessor:
         task_id: str,
         media_type: str
     ) -> str:
-        """Download media (image or video) from URL to local file"""
+        """Download media (image or video) from URL to local file.
+
+        Retries on transient network errors (connection dropped mid-download,
+        read timeouts, 5xx responses), which are common with the remote media
+        host and would otherwise fail the whole frame/pipeline.
+        """
+        import asyncio
+
         from pixelle_video.utils.os_util import get_task_frame_path
         output_path = get_task_frame_path(task_id, frame_index, media_type)
-        
-        timeout = httpx.Timeout(connect=10.0, read=60, write=60, pool=60)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            
-            with open(output_path, 'wb') as f:
-                f.write(response.content)
-        
-        return output_path
+
+        timeout = httpx.Timeout(connect=10.0, read=120, write=60, pool=60)
+        max_attempts = 4
+
+        last_error: Optional[Exception] = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    async with client.stream("GET", url) as response:
+                        response.raise_for_status()
+                        with open(output_path, 'wb') as f:
+                            async for chunk in response.aiter_bytes(chunk_size=65536):
+                                f.write(chunk)
+                return output_path
+            except (httpx.TransportError, httpx.HTTPStatusError) as e:
+                # Don't retry client errors (4xx) - they won't recover
+                if isinstance(e, httpx.HTTPStatusError) and e.response.status_code < 500:
+                    raise
+                last_error = e
+                if attempt < max_attempts:
+                    backoff = 2 ** (attempt - 1)  # 1s, 2s, 4s
+                    logger.warning(
+                        f"  ⚠ Download attempt {attempt}/{max_attempts} failed for "
+                        f"frame {frame_index} ({type(e).__name__}); retrying in {backoff}s"
+                    )
+                    await asyncio.sleep(backoff)
+
+        raise RuntimeError(
+            f"Failed to download media after {max_attempts} attempts: {url}"
+        ) from last_error
     
     async def _get_video_duration(self, video_path: str) -> float:
         """Get video duration in seconds"""

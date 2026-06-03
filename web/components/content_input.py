@@ -53,7 +53,7 @@ def render_content_input():
                 ["generate", "fixed"],
                 horizontal=True,
                 format_func=lambda x: tr(f"mode.{x}"),
-                index=0,
+                index=1,
                 label_visibility="collapsed"
             )
             
