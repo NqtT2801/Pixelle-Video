@@ -24,7 +24,7 @@ from loguru import logger
 
 from pixelle_video.services.comfy_base_service import ComfyBaseService
 from pixelle_video.utils.tts_util import edge_tts
-from pixelle_video.tts_voices import speed_to_rate, get_voice_provider, get_voice_params
+from pixelle_video.tts_voices import speed_to_rate
 
 
 class TTSService(ComfyBaseService):
@@ -161,50 +161,23 @@ class TTSService(ComfyBaseService):
         local_config = self.config.get("local", {})
         
         # Determine voice and speed (param > config)
-        final_voice = voice or local_config.get("voice", "vi-VN-HoaiMyNeural")
+        final_voice = voice or local_config.get("voice", "zh-CN-YunjianNeural")
         final_speed = speed if speed is not None else local_config.get("speed", 1.2)
-
+        
+        # Convert speed to rate parameter
+        rate = speed_to_rate(final_speed)
+        
+        logger.info(f"🎙️  Using local Edge TTS: voice={final_voice}, speed={final_speed}x (rate={rate})")
+        
         # Generate output path if not provided
         if not output_path:
             # Generate unique filename
             unique_id = uuid.uuid4().hex
             output_path = f"output/{unique_id}.mp3"
-
+            
             # Ensure output directory exists
             Path("output").mkdir(parents=True, exist_ok=True)
-
-        # Route to the right local provider based on the selected voice
-        provider = get_voice_provider(final_voice)
-
-        # VietVoice-TTS: offline ONNX, natural Vietnamese voices (e.g. Northern male/female)
-        if provider == "vietvoice":
-            # Lazy import so the app still runs if VietVoice isn't installed yet
-            from pixelle_video.utils.vietvoice_util import vietvoice_tts
-
-            params = get_voice_params(final_voice)
-            logger.info(
-                f"🎙️  Using local VietVoice-TTS: voice={final_voice}, "
-                f"params={params}, speed={final_speed}x"
-            )
-            try:
-                await vietvoice_tts(
-                    text=text,
-                    gender=params.get("gender", "female"),
-                    area=params.get("area", "northern"),
-                    speed=final_speed,
-                    output_path=output_path,
-                )
-                logger.info(f"✅ Generated audio (local VietVoice-TTS): {output_path}")
-                return output_path
-            except Exception as e:
-                logger.error(f"Local VietVoice-TTS generation error: {e}")
-                raise
-
-        # Default provider: Microsoft Edge TTS
-        rate = speed_to_rate(final_speed)
-
-        logger.info(f"🎙️  Using local Edge TTS: voice={final_voice}, speed={final_speed}x (rate={rate})")
-
+        
         # Call Edge TTS
         try:
             audio_bytes = await edge_tts(
@@ -213,10 +186,10 @@ class TTSService(ComfyBaseService):
                 rate=rate,
                 output_path=output_path
             )
-
+            
             logger.info(f"✅ Generated audio (local Edge TTS): {output_path}")
             return output_path
-
+        
         except Exception as e:
             logger.error(f"Local TTS generation error: {e}")
             raise
