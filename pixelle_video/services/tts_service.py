@@ -521,9 +521,19 @@ class TTSService(ComfyBaseService):
         from pixelle_video.services.vieneu_service import VieNeuEngine
         engine = VieNeuEngine()
         out_wav = f"{output_path}.vieneu.wav"
+
+        # Pin the preset speaker so every segment of a video sounds identical. VieNeu's
+        # sampler is stochastic/unseeded, so independent calls occasionally drift to a
+        # different-sounding voice. A fixed seed + lower temperature keep it consistent.
+        # (0.4 is VieNeu's own `turbo.py` default; None would use the 0.8 package default.)
+        local_cfg = self.config.get("local", {})
+        temperature = local_cfg.get("vieneu_temperature", 0.4)
+        seed = local_cfg.get("vieneu_seed", 1234)
         try:
             # Blocking ONNX inference -> run in a thread
-            await asyncio.to_thread(engine.synthesize, text, voice_id, out_wav)
+            await asyncio.to_thread(
+                engine.synthesize, text, voice_id, out_wav, temperature, seed
+            )
 
             # Transcode 48kHz wav -> mp3, adjusting tempo if speed != 1.0
             import ffmpeg

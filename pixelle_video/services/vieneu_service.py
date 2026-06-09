@@ -87,16 +87,44 @@ class VieNeuEngine:
     # ------------------------------------------------------------------ #
     # Synthesis
     # ------------------------------------------------------------------ #
-    def synthesize(self, text: str, voice_id: str, output_wav: str) -> str:
+    def synthesize(
+        self,
+        text: str,
+        voice_id: str,
+        output_wav: str,
+        temperature: Optional[float] = None,
+        seed: Optional[int] = None,
+    ) -> str:
         """Synthesize ``text`` with the named preset ``voice_id``; write a 48 kHz wav.
 
         VieNeu has no speed control — tempo is adjusted by the caller (ffmpeg ``atempo``)
         when transcoding to the final mp3.
+
+        ``temperature`` / ``seed`` make the timbre consistent across calls. VieNeu's
+        token sampler is stochastic and unseeded by default, so independent segments
+        of the same video occasionally drift to a different-sounding voice. Seeding the
+        RNG (and lowering temperature) pins the preset speaker so every segment matches.
+        The CPU/ONNX backend samples via NumPy's global RNG (``np.random.choice``); the
+        CUDA/PyTorch backend uses ``torch.multinomial`` — so we seed both.
         """
         model = self._ensure_model()
         os.makedirs(os.path.dirname(output_wav) or ".", exist_ok=True)
-        # emotion/temperature use the package defaults ("natural", 0.8, ...).
-        wav = model.infer(text, voice=voice_id)
+
+        if seed is not None:
+            import numpy as np
+            np.random.seed(seed)
+            try:
+                import torch
+                torch.manual_seed(seed)
+            except ImportError:
+                pass  # torch-free ONNX backend: NumPy seed above is sufficient
+
+        # emotion uses the package default ("natural"). temperature defaults to the
+        # package value (0.8) when not overridden by the caller.
+        infer_kwargs = {"voice": voice_id}
+        if temperature is not None:
+            infer_kwargs["temperature"] = temperature
+        wav = model.infer(text, **infer_kwargs)
         model.save(wav, output_wav)
         logger.info(f"✅ VieNeu synthesized '{voice_id}': {output_wav}")
         return output_wav

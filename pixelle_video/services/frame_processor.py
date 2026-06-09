@@ -30,6 +30,20 @@ from pixelle_video.models.progress import ProgressEvent
 from pixelle_video.models.storyboard import Storyboard, StoryboardFrame, StoryboardConfig
 
 
+# Default negative prompt for video (image→video) generation. Image→video models
+# (e.g. Wan2.2) intermittently produce anatomy/body-horror artifacts on people —
+# detached heads, extra/fused limbs, melting — especially with babies/children. This
+# discourages those failure modes. Override per-deployment via config
+# ``media.negative_prompt`` (set to "" to disable). Only applied when the workflow
+# itself maps a negative-prompt input; harmless otherwise.
+DEFAULT_VIDEO_NEGATIVE_PROMPT = (
+    "deformed anatomy, detached head, decapitation, severed head, floating head, "
+    "dismemberment, body horror, gore, extra limbs, extra fingers, fused limbs, "
+    "distorted body, malformed face, malformed baby, mutation, disfigured, "
+    "broken neck, melting, glitch, flickering, morphing"
+)
+
+
 def _allocate_durations(chunks: List[str], total: float, min_dur: float = 0.4) -> List[float]:
     """
     Split ``total`` seconds across subtitle ``chunks`` proportional to their text
@@ -258,7 +272,16 @@ class FrameProcessor:
         if is_video_workflow and frame.duration:
             media_params["duration"] = frame.duration
             logger.info(f"  → Generating video with target duration: {frame.duration:.2f}s (from TTS audio)")
-        
+
+        # For video workflows: steer away from anatomy/body-horror artifacts with a
+        # default negative prompt (overridable via config ``media.negative_prompt``,
+        # "" to disable). No-op for workflows that don't map a negative-prompt input.
+        if is_video_workflow:
+            media_cfg = self.core.config.get("media", {}) if self.core.config else {}
+            negative_prompt = media_cfg.get("negative_prompt", DEFAULT_VIDEO_NEGATIVE_PROMPT)
+            if negative_prompt:
+                media_params["negative_prompt"] = negative_prompt
+
         # Call Media generation
         media_result = await self.core.media(**media_params)
         
