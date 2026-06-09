@@ -752,7 +752,239 @@ class VideoService:
             error_msg = e.stderr.decode() if e.stderr else str(e)
             logger.error(f"FFmpeg error creating video from image: {error_msg}")
             raise RuntimeError(f"Failed to create video from image: {error_msg}")
-    
+
+    def create_video_from_image_sequence(
+        self,
+        images: List[str],
+        durations: List[float],
+        audio: str,
+        output: str,
+        fps: int = 30,
+    ) -> str:
+        """
+        Create a video segment from a sequence of still images, each shown for a
+        given duration, with a single audio track.
+
+        Used for read-along subtitles on image frames: every image is the same scene
+        rendered with a different subtitle chunk, shown for its chunk's duration while
+        the full-scene narration plays underneath.
+
+        Args:
+            images: Image file paths, in display order.
+            durations: On-screen seconds per image (same length as ``images``).
+            audio: Narration audio for the whole segment.
+            output: Output video path.
+            fps: Frames per second.
+
+        Returns:
+            Path to the output video.
+
+        Raises:
+            RuntimeError: If FFmpeg execution fails.
+        """
+        self._ensure_ffmpeg()
+
+        if not images:
+            raise ValueError("images list cannot be empty")
+        if len(images) != len(durations):
+            raise ValueError(
+                f"images ({len(images)}) and durations ({len(durations)}) length mismatch"
+            )
+
+        total_duration = float(sum(durations))
+        logger.info(
+            f"Creating video from {len(images)} image(s) sequence "
+            f"(total {total_duration:.2f}s)"
+        )
+
+        # Build a concat-demuxer list with per-image durations. The demuxer needs the
+        # final image repeated (without a trailing 'duration') to set its end time.
+        with tempfile.NamedTemporaryFile(
+            mode='w', delete=False, suffix='.txt', encoding='utf-8'
+        ) as f:
+            for img, dur in zip(images, durations):
+                abs_path = str(Path(img).absolute()).replace("'", "'\\''")
+                f.write(f"file '{abs_path}'\n")
+                f.write(f"duration {float(dur):.3f}\n")
+            last_path = str(Path(images[-1]).absolute()).replace("'", "'\\''")
+            f.write(f"file '{last_path}'\n")
+            filelist = f.name
+
+        try:
+            slideshow = ffmpeg.input(filelist, format='concat', safe=0)
+            # Resample the variable-duration concat output to constant fps.
+            video_stream = slideshow.video.filter('fps', fps=fps).filter('format', 'yuv420p')
+            input_audio = ffmpeg.input(audio)
+            (
+                ffmpeg
+                .output(
+                    video_stream,
+                    input_audio,
+                    output,
+                    t=total_duration,  # match audio/segment duration exactly
+                    vcodec='libx264',
+                    acodec='aac',
+                    audio_bitrate='192k',
+                    preset='medium',
+                    crf=23,
+                    **{'b:v': '2M'}
+                )
+                .overwrite_output()
+                .run(capture_stdout=True, capture_stderr=True)
+            )
+            logger.success(
+                f"Video created from image sequence: {output} ({total_duration:.2f}s)"
+            )
+            return output
+        except ffmpeg.Error as e:
+            error_msg = e.stderr.decode() if e.stderr else str(e)
+            logger.error(f"FFmpeg error creating video from image sequence: {error_msg}")
+            raise RuntimeError(f"Failed to create video from image sequence: {error_msg}")
+        finally:
+            if os.path.exists(filelist):
+                os.unlink(filelist)
+
+    def overlay_images_on_video_timed(
+        self,
+        video: str,
+        overlays: List[dict],
+        output: str,
+        scale_mode: str = "contain",
+    ) -> str:
+        """
+        Overlay a sequence of transparent images on a video, each shown only during
+        its time window.
+
+        Like ``overlay_image_on_video`` but for read-along subtitles: ``overlays`` is
+        a list of ``{"image", "start", "end"}`` (seconds) and each is composited via
+        ``enable='between(t,start,end)'``. All overlays share the template size; the
+        base video is scaled to that size using ``scale_mode``.
+
+        Returns:
+            Path to the output video (video only; add audio separately).
+        """
+        self._ensure_ffmpeg()
+        if not overlays:
+            raise ValueError("overlays list cannot be empty")
+        logger.info(
+            f"Overlaying {len(overlays)} timed image(s) on video (scale_mode={scale_mode})"
+        )
+
+        try:
+            # All overlays share the template size; use the first to size the canvas.
+            probe = ffmpeg.probe(overlays[0]["image"])
+            ostream = next(s for s in probe['streams'] if s['codec_type'] == 'video')
+            ow, oh = int(ostream['width']), int(ostream['height'])
+
+            input_video = ffmpeg.input(video)
+            if scale_mode == "contain":
+                base = (
+                    input_video
+                    .filter('scale', ow, oh, force_original_aspect_ratio='decrease')
+                    .filter('pad', ow, oh, '(ow-iw)/2', '(oh-ih)/2', color='black')
+                )
+            elif scale_mode == "cover":
+                base = (
+                    input_video
+                    .filter('scale', ow, oh, force_original_aspect_ratio='increase')
+                    .filter('crop', ow, oh)
+                )
+            else:  # stretch
+                base = input_video.filter('scale', ow, oh)
+
+            stream = base
+            for ov in overlays:
+                ov_in = ffmpeg.input(ov["image"])
+                stream = ffmpeg.overlay(
+                    stream,
+                    ov_in,
+                    enable=f"between(t,{float(ov['start']):.3f},{float(ov['end']):.3f})",
+                )
+
+            (
+                ffmpeg
+                .output(stream, output, vcodec='libx264', pix_fmt='yuv420p',
+                        preset='medium', crf=23)
+                .overwrite_output()
+                .run(capture_stdout=True, capture_stderr=True)
+            )
+            logger.success(f"Timed images overlaid on video: {output}")
+            return output
+        except ffmpeg.Error as e:
+            error_msg = e.stderr.decode() if e.stderr else str(e)
+            logger.error(f"FFmpeg timed overlay error: {error_msg}")
+            raise RuntimeError(f"Failed to overlay timed images on video: {error_msg}")
+
+    def composite_video_in_region_timed(
+        self,
+        video: str,
+        overlays: List[dict],
+        output: str,
+        region: dict,
+        canvas_size: tuple = (1080, 1920),
+        bg_color: str = "#fdf6ec",
+        fps: int = 30,
+    ) -> str:
+        """
+        Like ``composite_video_in_region`` but overlays a sequence of transparent
+        template images, each shown only during its time window (read-along subtitles).
+
+        ``overlays`` is a list of ``{"image", "start", "end"}`` (seconds). Returns the
+        output video path (video only; add audio separately).
+        """
+        self._ensure_ffmpeg()
+        if not overlays:
+            raise ValueError("overlays list cannot be empty")
+        x, y, w, h = region["x"], region["y"], region["w"], region["h"]
+        cw, ch = canvas_size
+        duration = self._get_video_duration(video)
+        logger.info(
+            f"Compositing video into window {w}x{h}@({x},{y}) on {cw}x{ch} canvas "
+            f"with {len(overlays)} timed overlay(s)"
+        )
+
+        try:
+            base = ffmpeg.input(
+                f"color=c={bg_color}:s={cw}x{ch}:r={fps}:d={duration:.3f}",
+                f="lavfi",
+            )
+            scaled = ffmpeg.input(video).video.filter(
+                "scale", w, h, force_original_aspect_ratio="decrease"
+            )
+            x_expr = f"{x}+({w}-overlay_w)/2"
+            y_expr = f"{y}+({h}-overlay_h)/2"
+            stream = ffmpeg.overlay(base, scaled, x=x_expr, y=y_expr)
+
+            for ov in overlays:
+                ov_in = ffmpeg.input(ov["image"])
+                stream = ffmpeg.overlay(
+                    stream,
+                    ov_in,
+                    x=0,
+                    y=0,
+                    enable=f"between(t,{float(ov['start']):.3f},{float(ov['end']):.3f})",
+                )
+
+            (
+                ffmpeg
+                .output(
+                    stream, output,
+                    vcodec="libx264",
+                    pix_fmt="yuv420p",
+                    preset="medium",
+                    crf=23,
+                    t=duration,
+                )
+                .overwrite_output()
+                .run(capture_stdout=True, capture_stderr=True)
+            )
+            logger.success(f"Video composited in region with timed overlays: {output}")
+            return output
+        except ffmpeg.Error as e:
+            error_msg = e.stderr.decode() if e.stderr else str(e)
+            logger.error(f"FFmpeg region-composite (timed) error: {error_msg}")
+            raise RuntimeError(f"Failed to composite video in region (timed): {error_msg}")
+
     def add_bgm(
         self,
         video: str,

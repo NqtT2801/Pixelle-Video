@@ -24,7 +24,7 @@ from loguru import logger
 
 from pixelle_video.services.comfy_base_service import ComfyBaseService
 from pixelle_video.utils.tts_util import edge_tts
-from pixelle_video.tts_voices import speed_to_rate, resolve_custom_voice
+from pixelle_video.tts_voices import speed_to_rate, resolve_custom_voice, resolve_vieneu_voice
 
 
 class TTSService(ComfyBaseService):
@@ -261,6 +261,11 @@ class TTSService(ComfyBaseService):
             # Ensure output directory exists
             Path("output").mkdir(parents=True, exist_ok=True)
 
+        # VieNeu preset voice: self-contained Vietnamese named-voice engine (no ref clip).
+        vieneu = resolve_vieneu_voice(final_voice)
+        if vieneu:
+            return await self._call_vieneu(text, vieneu, final_speed, output_path)
+
         # Cloned voice: route to the configured clone engine.
         #   vixtts   -> true zero-shot cloning (timbre + intonation), Vietnamese
         #   openvoice -> Edge TTS base + OpenVoice tone-color conversion (fallback)
@@ -492,6 +497,53 @@ class TTSService(ComfyBaseService):
                 pass
 
         logger.info(f"✅ Generated cloned audio (viXTTS): {output_path}")
+        return output_path
+
+    async def _call_vieneu(
+        self,
+        text: str,
+        vieneu: dict,
+        speed: float,
+        output_path: str,
+    ) -> str:
+        """
+        Generate speech with a VieNeu-TTS preset voice (Vietnamese named-voice engine).
+
+        VieNeu speaks the text directly in the named preset voice (no reference clip).
+        It has no speed control, so tempo is applied here via ffmpeg ``atempo`` while
+        transcoding the 48 kHz wav to the requested mp3.
+        """
+        import asyncio
+
+        voice_id = vieneu["voice_id"]
+        logger.info(f"🗣️  VieNeu preset voice '{voice_id}' (v3 Turbo)")
+
+        from pixelle_video.services.vieneu_service import VieNeuEngine
+        engine = VieNeuEngine()
+        out_wav = f"{output_path}.vieneu.wav"
+        try:
+            # Blocking ONNX inference -> run in a thread
+            await asyncio.to_thread(engine.synthesize, text, voice_id, out_wav)
+
+            # Transcode 48kHz wav -> mp3, adjusting tempo if speed != 1.0
+            import ffmpeg
+            stream = ffmpeg.input(out_wav)
+            if speed and abs(speed - 1.0) > 0.01:
+                tempo = max(0.5, min(2.0, speed))
+                stream = stream.output(
+                    output_path, **{"filter:a": f"atempo={tempo}"}, loglevel="error"
+                )
+            else:
+                stream = stream.output(output_path, loglevel="error")
+            stream.overwrite_output().run()
+        finally:
+            try:
+                if os.path.exists(out_wav):
+                    os.unlink(out_wav)
+            except OSError:
+                pass
+
+        logger.info(f"✅ Generated audio (VieNeu): {output_path}")
         return output_path
 
     async def _call_cloned_tts(

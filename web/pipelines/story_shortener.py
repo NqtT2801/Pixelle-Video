@@ -14,8 +14,10 @@
 Story Shortener Pipeline UI
 
 A standalone text tool: paste a person's first-person life narrative and the
-Claude Code subscription condenses it into a title plus a coherent 10-paragraph
-summary (~420 words) that preserves the narrator's original voice.
+Claude Code subscription condenses it into a title plus a coherent 18-paragraph
+summary, where each paragraph is sized to be read in ~5s by the VieNeu TTS voice
+(18 × 5s ≈ a 90s video) and sanitized for natural reading. It preserves the
+narrator's original voice.
 """
 
 from typing import Any

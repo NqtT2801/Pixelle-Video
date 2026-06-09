@@ -30,6 +30,8 @@ from typing import List, Dict, Any, Optional
 # `pixelle_video.services.voice_conversion`.
 VOICES_DIR = "voices"
 CLONE_VOICE_PREFIX = "clone:"
+# VieNeu-TTS preset voices are selected by id (see VIENEU_VOICES below).
+VIENEU_VOICE_PREFIX = "vieneu:"
 # Northern Vietnamese male Edge voice used to drive pronunciation/prosody before
 # the timbre is converted to the reference clip.
 DEFAULT_CLONE_BASE = "vi-VN-NamMinhNeural"
@@ -226,6 +228,32 @@ EDGE_TTS_VOICES: List[Dict[str, Any]] = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# VieNeu-TTS preset voices (Vietnamese named-voice engine)
+# ---------------------------------------------------------------------------
+# VieNeu-TTS (https://github.com/pnnbao97/VieNeu-TTS) ships built-in preset voices,
+# synthesized by `pixelle_video.services.vieneu_service.VieNeuEngine`. Unlike `clone:`
+# voices these are named speakers selected by id (no reference clip), so — like Edge
+# TTS — they are a static registry. `voice_id` is the name passed to VieNeu's
+# `infer(voice=...)`; `name` is the friendly label shown in the UI.
+#
+# Roster below is the v3 Turbo set (vieneu==3.0.4, assets/voices_v3_turbo.json). Refresh
+# after a package update with:
+#   python -c "from pixelle_video.services.vieneu_service import VieNeuEngine as E; print(E().list_preset_voices())"
+VIENEU_VOICES: List[Dict[str, Any]] = [
+    {"id": "vieneu:Ngọc Lan", "voice_id": "Ngọc Lan", "name": "Ngọc Lan - nữ, giọng dịu dàng (VieNeu)", "locale": "vi-VN", "gender": "female"},
+    {"id": "vieneu:Gia Bảo", "voice_id": "Gia Bảo", "name": "Gia Bảo - nam, giọng mượt mà (VieNeu)", "locale": "vi-VN", "gender": "male"},
+    {"id": "vieneu:Thái Sơn", "voice_id": "Thái Sơn", "name": "Thái Sơn - nam, giọng chắc khỏe (VieNeu)", "locale": "vi-VN", "gender": "male"},
+    {"id": "vieneu:Đức Trí", "voice_id": "Đức Trí", "name": "Đức Trí - nam, giọng rõ ràng (VieNeu)", "locale": "vi-VN", "gender": "male"},
+    {"id": "vieneu:Mỹ Duyên", "voice_id": "Mỹ Duyên", "name": "Mỹ Duyên - nữ, giọng mượt mà (VieNeu)", "locale": "vi-VN", "gender": "female"},
+    {"id": "vieneu:Trúc Ly", "voice_id": "Trúc Ly", "name": "Trúc Ly - nữ, giọng trẻ trung (VieNeu)", "locale": "vi-VN", "gender": "female"},
+    {"id": "vieneu:Xuân Vĩnh", "voice_id": "Xuân Vĩnh", "name": "Xuân Vĩnh - nam, giọng vui tươi (VieNeu)", "locale": "vi-VN", "gender": "male"},
+    {"id": "vieneu:Trọng Hữu", "voice_id": "Trọng Hữu", "name": "Trọng Hữu - nam, giọng uyên bác (VieNeu)", "locale": "vi-VN", "gender": "male"},
+    {"id": "vieneu:Bình An", "voice_id": "Bình An", "name": "Bình An - nam, giọng điềm đạm (VieNeu)", "locale": "vi-VN", "gender": "male"},
+    {"id": "vieneu:Ngọc Linh", "voice_id": "Ngọc Linh", "name": "Ngọc Linh - nữ, giọng tươi sáng (VieNeu)", "locale": "vi-VN", "gender": "female"},
+]
+
+
 def list_custom_voices() -> List[Dict[str, Any]]:
     """
     Scan the ``voices/`` directory for reference clips and expose each one as a
@@ -277,6 +305,16 @@ def resolve_custom_voice(voice_id: Optional[str]) -> Optional[Dict[str, Any]]:
     return next((v for v in list_custom_voices() if v["id"] == voice_id), None)
 
 
+def resolve_vieneu_voice(voice_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """
+    Return the VieNeu preset config for a ``vieneu:<name>`` id, or None if the id is
+    not a VieNeu voice (e.g. a normal Edge or cloned voice).
+    """
+    if not voice_id or not voice_id.startswith(VIENEU_VOICE_PREFIX):
+        return None
+    return next((v for v in VIENEU_VOICES if v["id"] == voice_id), None)
+
+
 def get_voice_display_name(voice_id: str, tr_func=None, locale: str = "zh_CN") -> str:
     """
     Get display name for voice
@@ -293,6 +331,11 @@ def get_voice_display_name(voice_id: str, tr_func=None, locale: str = "zh_CN") -
     custom = resolve_custom_voice(voice_id)
     if custom:
         return custom["name"]
+
+    # VieNeu preset voices: show their friendly Vietnamese name
+    vieneu = resolve_vieneu_voice(voice_id)
+    if vieneu:
+        return vieneu["name"]
 
     # Find voice config
     voice_config = next((v for v in EDGE_TTS_VOICES if v["id"] == voice_id), None)

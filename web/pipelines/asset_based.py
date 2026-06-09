@@ -229,7 +229,7 @@ class AssetBasedPipelineUI(PipelineUI):
             st.markdown(f"**{tr('section.tts')}**")
             
             # Import voice configuration
-            from pixelle_video.tts_voices import EDGE_TTS_VOICES, get_voice_display_name
+            from pixelle_video.tts_voices import VIENEU_VOICES, get_voice_display_name
             
             # Get saved voice from config
             comfyui_config = config_manager.get_comfyui_config()
@@ -243,12 +243,12 @@ class AssetBasedPipelineUI(PipelineUI):
             voice_ids = []
             default_voice_index = 0
             
-            for idx, voice_config in enumerate(EDGE_TTS_VOICES):
+            for idx, voice_config in enumerate(VIENEU_VOICES):
                 voice_id = voice_config["id"]
                 display_name = get_voice_display_name(voice_id, tr, get_language())
                 voice_options.append(display_name)
                 voice_ids.append(voice_id)
-                
+
                 if voice_id == saved_voice:
                     default_voice_index = idx
             

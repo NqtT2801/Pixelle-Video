@@ -53,6 +53,10 @@ class StoryboardConfig:
     frame_template: str = "1080x1920/default.html"  # Template path with size (e.g., "1080x1920/default.html")
     template_params: Optional[Dict[str, Any]] = None  # Custom template parameters (e.g., {"accent_color": "#ff0000"})
 
+    # Progressive (read-along) subtitles
+    subtitle_sync: bool = False                # Split each frame's narration into short chunks shown in sync with the voice
+    subtitle_max_chars: int = 24               # Target max characters per subtitle chunk (~1 line)
+
 
 @dataclass
 class StoryboardFrame:
@@ -68,6 +72,13 @@ class StoryboardFrame:
     video_path: Optional[str] = None           # Original video path (for video type, before composition)
     composed_image_path: Optional[str] = None  # Composed image path (with subtitles, for image type)
     video_segment_path: Optional[str] = None   # Final video segment path
+
+    # Progressive (read-along) subtitles: when enabled and the narration splits into
+    # multiple chunks, these hold the per-chunk subtitle text, on-screen durations
+    # (seconds, summing to `duration`), and one composed frame rendered per chunk.
+    subtitle_chunks: Optional[List[str]] = None
+    subtitle_durations: Optional[List[float]] = None
+    composed_image_paths: Optional[List[str]] = None
     
     # Metadata
     duration: float = 0.0                      # Frame duration (seconds, from audio or video)

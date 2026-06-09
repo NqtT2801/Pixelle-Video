@@ -20,13 +20,46 @@ Key Feature:
   to ensure perfect sync between audio and video (no padding, no trimming needed)
 """
 
-from typing import Callable, Optional
+import re
+from typing import Callable, List, Optional
 
 import httpx
 from loguru import logger
 
 from pixelle_video.models.progress import ProgressEvent
 from pixelle_video.models.storyboard import Storyboard, StoryboardFrame, StoryboardConfig
+
+
+def _allocate_durations(chunks: List[str], total: float, min_dur: float = 0.4) -> List[float]:
+    """
+    Split ``total`` seconds across subtitle ``chunks`` proportional to their text
+    length (non-space characters), with a small per-chunk floor so very short phrases
+    don't flash by.
+
+    The returned durations always sum to ``total`` (any floating-point remainder is
+    added to the last chunk). Returns ``[]`` when there are no chunks.
+    """
+    n = len(chunks)
+    if n == 0:
+        return []
+    if total <= 0:
+        return [0.0] * n
+    if n == 1:
+        return [float(total)]
+
+    weights = [max(len(re.sub(r'\s+', '', c)), 1) for c in chunks]
+
+    if min_dur * n >= total:
+        # Floor can't fit -> even split.
+        durs = [total / n] * n
+    else:
+        free = total - min_dur * n
+        wsum = sum(weights)
+        durs = [min_dur + free * (w / wsum) for w in weights]
+
+    # Correct floating-point drift so the durations sum to exactly `total`.
+    durs[-1] += total - sum(durs)
+    return durs
 
 
 class FrameProcessor:
@@ -273,18 +306,46 @@ class FrameProcessor:
     ):
         """Step 3: Compose frame with subtitle using HTML template"""
         logger.debug(f"  3/4: Composing frame {frame.index}...")
-        
+
         # Generate output path using task_id
-        from pixelle_video.utils.os_util import get_task_frame_path
+        from pixelle_video.utils.os_util import get_task_frame_path, get_task_path
+
+        # Progressive (read-along) subtitles: render one composed frame per subtitle
+        # chunk (same media/title, different subtitle text) so the subtitle can advance
+        # with the voice. Falls back to a single render for short / single-chunk
+        # narrations (no behavior change, no extra renders).
+        if getattr(config, "subtitle_sync", False) and frame.duration and frame.narration:
+            from pixelle_video.utils.content_generators import split_into_subtitle_chunks
+
+            chunks = split_into_subtitle_chunks(frame.narration, config.subtitle_max_chars)
+            if len(chunks) > 1:
+                frame.subtitle_chunks = chunks
+                frame.subtitle_durations = _allocate_durations(chunks, frame.duration)
+                frame.composed_image_paths = []
+                for ci, chunk in enumerate(chunks):
+                    chunk_path = get_task_path(
+                        config.task_id, "frames",
+                        f"{frame.index + 1:02d}_composed_{ci:02d}.png"
+                    )
+                    composed = await self._compose_frame_html(
+                        frame, storyboard, config, chunk_path, text_override=chunk
+                    )
+                    frame.composed_image_paths.append(composed)
+                # Keep composed_image_path set (first chunk) for back-compat.
+                frame.composed_image_path = frame.composed_image_paths[0]
+                logger.debug(
+                    f"  ✓ Frame composed into {len(chunks)} subtitle chunk(s)"
+                )
+                return
+
+        # Default: single composed image with the full narration.
+        # For video type: HTML renders as a transparent overlay image.
+        # For image type: HTML renders with the image background.
         output_path = get_task_frame_path(config.task_id, frame.index, "composed")
-        
-        # For video type: render HTML as transparent overlay image
-        # For image type: render HTML with image background
-        # In both cases, we need the composed image
         composed_path = await self._compose_frame_html(frame, storyboard, config, output_path)
-        
+
         frame.composed_image_path = composed_path
-        
+
         logger.debug(f"  ✓ Frame composed: {composed_path}")
     
     async def _compose_frame_html(
@@ -292,9 +353,14 @@ class FrameProcessor:
         frame: StoryboardFrame,
         storyboard: 'Storyboard',
         config: StoryboardConfig,
-        output_path: str
+        output_path: str,
+        text_override: Optional[str] = None
     ) -> str:
-        """Compose frame using HTML template"""
+        """Compose frame using HTML template.
+
+        ``text_override`` lets callers render a subtitle chunk instead of the full
+        narration (used for progressive read-along subtitles).
+        """
         from pixelle_video.services.frame_html import HTMLFrameGenerator
         from pixelle_video.utils.template_util import resolve_template_path
         
@@ -322,12 +388,12 @@ class FrameProcessor:
         
         composed_path = await generator.generate_frame(
             title=storyboard.title,
-            text=frame.narration,
+            text=text_override if text_override is not None else frame.narration,
             image=media_path,  # HTMLFrameGenerator handles both image and video paths
             ext=ext,
             output_path=output_path
         )
-        
+
         return composed_path
     
     async def _step_create_video_segment(
@@ -350,8 +416,10 @@ class FrameProcessor:
             # Video workflow: overlay HTML template on video, then add audio
             logger.debug(f"  → Using video-based composition with HTML overlay")
 
-            # Step 1: Overlay transparent HTML image on video
-            # The composed_image_path contains the rendered HTML with transparent background
+            # Step 1: Overlay the transparent HTML image(s) on the video.
+            # With progressive subtitles, composed_image_paths holds one overlay per
+            # subtitle chunk (each shown during its time window); otherwise a single
+            # composed_image_path overlay is used for the whole segment.
             temp_video_with_overlay = get_task_frame_path(config.task_id, frame.index, "video") + "_overlay.mp4"
 
             # If the template declares a video window rect, place the video into
@@ -364,7 +432,38 @@ class FrameProcessor:
                 resolve_template_path(config.frame_template)
             )
 
-            if region:
+            if frame.composed_image_paths:
+                # Build cumulative time windows for the per-chunk overlays. Extend the
+                # last window well past the end so the final subtitle never vanishes a
+                # frame early when the video is slightly longer than the audio.
+                overlays = []
+                start = 0.0
+                for img, dur in zip(frame.composed_image_paths, frame.subtitle_durations):
+                    overlays.append({"image": img, "start": start, "end": start + dur})
+                    start += dur
+                overlays[-1]["end"] = start + 3600.0
+
+                if region:
+                    canvas_w, canvas_h = parse_template_size(
+                        resolve_template_path(config.frame_template)
+                    )
+                    video_service.composite_video_in_region_timed(
+                        video=frame.video_path,
+                        overlays=overlays,
+                        output=temp_video_with_overlay,
+                        region=region,
+                        canvas_size=(canvas_w, canvas_h),
+                        bg_color=region.get("bg_color", "#000000"),
+                        fps=config.video_fps,
+                    )
+                else:
+                    video_service.overlay_images_on_video_timed(
+                        video=frame.video_path,
+                        overlays=overlays,
+                        output=temp_video_with_overlay,
+                        scale_mode="contain",
+                    )
+            elif region:
                 canvas_w, canvas_h = parse_template_size(
                     resolve_template_path(config.frame_template)
                 )
@@ -404,13 +503,23 @@ class FrameProcessor:
             # Image workflow: Use composed image directly
             # The asset_default.html template includes the image in the composition
             logger.debug(f"  → Using image-based composition")
-            
-            segment_path = video_service.create_video_from_image(
-                image=frame.composed_image_path,
-                audio=frame.audio_path,
-                output=output_path,
-                fps=config.video_fps
-            )
+
+            if frame.composed_image_paths:
+                # Progressive subtitles: still "slideshow" of per-chunk images + audio.
+                segment_path = video_service.create_video_from_image_sequence(
+                    images=frame.composed_image_paths,
+                    durations=frame.subtitle_durations,
+                    audio=frame.audio_path,
+                    output=output_path,
+                    fps=config.video_fps,
+                )
+            else:
+                segment_path = video_service.create_video_from_image(
+                    image=frame.composed_image_path,
+                    audio=frame.audio_path,
+                    output=output_path,
+                    fps=config.video_fps
+                )
         
         else:
             raise ValueError(f"Unknown media type: {frame.media_type}")

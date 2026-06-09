@@ -33,29 +33,52 @@ class ClaudeCliError(Exception):
 
 
 class ShortenedStory(NamedTuple):
-    """A shortened narrative: an AI-suggested title and the 10-paragraph summary."""
+    """A shortened narrative: an AI-suggested title and the 18-paragraph summary.
+
+    The summary is split into EXACTLY 18 short paragraphs so that, downstream,
+    Quick Create turns each paragraph into one ~5s video segment (18 × 5s ≈ 90s).
+    """
     title: str
     summary: str
 
+
+# Target words per paragraph. Each paragraph becomes one video segment whose
+# duration equals the length of the VieNeu (Vietnamese TTS) audio that reads it.
+# This number is the single knob to tune the ~5s-per-segment target: lower it if
+# segments come out longer than 5s, raise it if they come out shorter.
+_WORDS_PER_PARAGRAPH = "14 to 18"
 
 # Instruction passed to `claude -p`. The narrative itself is piped via stdin,
 # so long stories are not constrained by command-line length limits. The title
 # is returned on a leading "TITLE:" line so a single plain-text call yields
 # both pieces (structured --json-schema output hangs together with --tools "").
-_SUMMARIZE_PROMPT = """You will receive a person's first-person narrative recounting their life circumstances and story.
+#
+# The output feeds a Vietnamese TTS engine (VieNeu): each of the 18 paragraphs is
+# read aloud as one ~5s segment, so the text must be both short-per-paragraph and
+# free of glyphs/abbreviations a TTS would mangle.
+_SUMMARIZE_PROMPT = f"""You will receive a person's first-person narrative recounting their life circumstances and story.
 
-Rewrite it as a condensed version. Rules:
-- Target ~420 words; do not exceed 445.
-- Structure the condensed version as EXACTLY 10 paragraphs separated by a blank line, with the content distributed evenly across the 10 paragraphs.
-- Stay in the first person and preserve the narrator's original voice, tone and writing style — do not turn it into a neutral report.
-- Each paragraph must be coherent, and the 10 paragraphs together must read as one well-connected story that any reader can easily follow and understand.
+The result will be read aloud, paragraph by paragraph, by a Vietnamese text-to-speech voice, where each paragraph becomes one short (~5 second) video segment. Rewrite the narrative as a condensed version optimized for that.
+
+Structure rules:
+- Output EXACTLY 18 paragraphs, separated by a single blank line, with the story distributed evenly across all 18.
+- Each paragraph must be roughly {_WORDS_PER_PARAGRAPH} words (about a single spoken line, ~5 seconds aloud); never exceed 20 words and never go below 12.
+- Stay in the first person and preserve the narrator's original voice, tone and emotion — do not turn it into a neutral report.
+- Each paragraph must be self-contained and natural to read aloud on its own, yet the 18 paragraphs together must flow as one coherent, easy-to-follow story.
 - Keep the essential events, emotions and circumstances; remove only repetition and minor detail.
 - Write in the SAME language as the input narrative.
 
+Natural-reading rules (so the TTS voice never stumbles) — apply throughout:
+- Spell out EVERY number, year, date, time, unit and percentage as full words in the output language. Examples (Vietnamese): `2020` -> "hai nghìn không trăm hai mươi", `5km` -> "năm ki-lô-mét", `30%` -> "ba mươi phần trăm", `8h` -> "tám giờ".
+- Expand or rewrite abbreviations and symbols into words. Examples: `TP.HCM` -> "Thành phố Hồ Chí Minh", `&` -> "và". Do not leave bare acronyms.
+- Replace foreign (e.g. English) words with a natural equivalent in the output language, or transliterate them so the voice pronounces them correctly. Do not leave raw foreign spellings.
+- Use only the basic punctuation marks `.` `,` `!` `?` to shape the rhythm. Do NOT use parentheses, slashes, ellipses, dashes, quotation marks, emoji or any other special characters.
+- Avoid hard-to-pronounce clusters and ambiguous shorthand; prefer common, plainly spoken phrasing.
+
 Output format — follow it EXACTLY and output nothing else:
-- The first line must be `TITLE: ` followed by a short, evocative title (at most ~10 words, same language as the input, no quotes).
+- The first line must be `TITLE: ` followed by a short, evocative title (at most ~10 words, same language as the input, no quotes), itself following the natural-reading rules above.
 - Then one empty line.
-- Then the condensed version: exactly 10 paragraphs separated by one empty line, with no heading, labels, quotes or numbering."""
+- Then the condensed version: exactly 18 paragraphs separated by one empty line, with no heading, labels, quotes or numbering."""
 
 _TITLE_PREFIX = "TITLE:"
 
@@ -87,8 +110,10 @@ def summarize_story(narrative: str, timeout: int = 240) -> ShortenedStory:
     Condense a first-person life narrative via the Claude Code CLI.
 
     Runs the logged-in Claude Code subscription (Sonnet, medium effort) and
-    returns a title plus a ~420-word, 10-paragraph summary that preserves the
-    narrator's voice and the input language.
+    returns a title plus an 18-paragraph summary that preserves the narrator's
+    voice and the input language. Each paragraph is sized to read in ~5s by the
+    VieNeu TTS voice (18 × 5s ≈ 90s) and is sanitized for natural reading
+    (numbers/abbreviations spelled out, no TTS-unfriendly glyphs).
 
     Args:
         narrative: The raw first-person narrative.

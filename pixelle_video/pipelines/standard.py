@@ -269,7 +269,13 @@ class StandardPipeline(LinearVideoPipeline):
             media_height=ctx.params.get("media_height"),
             media_workflow=ctx.params.get("media_workflow"),
             frame_template=ctx.params.get("frame_template") or "1080x1920/default.html",
-            template_params=ctx.params.get("template_params")
+            template_params=ctx.params.get("template_params"),
+            # Progressive (read-along) subtitles: OFF by default for Quick Create.
+            # Narrations are short (one ~5s spoken line per paragraph), so each segment
+            # shows its whole narration once — best audio sync, no flicker, and it never
+            # splits a spelled-out number across lines. Overridable via params/API.
+            subtitle_sync=ctx.params.get("subtitle_sync", False),
+            subtitle_max_chars=ctx.params.get("subtitle_max_chars", 24),
         )
         
         # Create storyboard

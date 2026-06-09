@@ -266,6 +266,88 @@ async def split_narration_script(
     return narrations
 
 
+def _pack_to_width(text: str, max_chars: int) -> List[str]:
+    """
+    Greedily pack a piece of text into lines no longer than ``max_chars`` without
+    breaking words.
+
+    Words are split on spaces. Text with no spaces (e.g. Chinese) is hard-wrapped
+    every ``max_chars`` characters. A single word longer than ``max_chars`` is kept
+    whole on its own line (overflow is preferred over cutting a word).
+    """
+    text = text.strip()
+    if not text:
+        return []
+    if len(text) <= max_chars:
+        return [text]
+
+    if ' ' not in text:
+        # No word boundaries (CJK): hard-wrap by character count.
+        return [text[i:i + max_chars] for i in range(0, len(text), max_chars)]
+
+    lines: List[str] = []
+    current = ''
+    for word in text.split(' '):
+        if not word:
+            continue
+        if not current:
+            current = word
+        elif len(current) + 1 + len(word) <= max_chars:
+            current += ' ' + word
+        else:
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
+def split_into_subtitle_chunks(text: str, max_chars: int = 24) -> List[str]:
+    """
+    Split a narration into short, read-along subtitle chunks (~1 line each).
+
+    Used to display the subtitle progressively in sync with the voice instead of
+    showing a whole paragraph at once. The split is purely textual (no timing):
+
+    1. Collapse all whitespace to single spaces (subtitles render on one line).
+    2. Split into sentences on sentence-ending punctuation (。.!?！？).
+    3. Any sentence longer than ``max_chars`` is broken further — first at clause
+       delimiters (，,、;；:：…—–), then by greedily packing space-separated words
+       into lines no longer than ``max_chars`` without breaking a word. Text with no
+       spaces (e.g. Chinese) is hard-wrapped every ``max_chars`` characters.
+
+    A single token longer than ``max_chars`` is kept as its own chunk.
+
+    Args:
+        text: Narration text for one frame.
+        max_chars: Target maximum characters per chunk.
+
+    Returns:
+        List of trimmed, non-empty subtitle chunks (``[]`` for empty input).
+    """
+    cleaned = re.sub(r'\s+', ' ', (text or '').strip())
+    if not cleaned:
+        return []
+
+    max_chars = max(1, int(max_chars))
+
+    # 1. Sentence split (keep the punctuation with each sentence)
+    sentences = [s.strip() for s in re.split(r'(?<=[。.!?！？])\s*', cleaned) if s.strip()]
+
+    chunks: List[str] = []
+    for sentence in sentences:
+        if len(sentence) <= max_chars:
+            chunks.append(sentence)
+            continue
+        # 2. Break long sentences at clause delimiters first, then pack words.
+        #    Zero-width lookbehind keeps each delimiter attached to its clause.
+        clauses = [c.strip() for c in re.split(r'(?<=[，,、;；:：…—–])', sentence) if c.strip()]
+        for clause in (clauses or [sentence]):
+            chunks.extend(_pack_to_width(clause, max_chars))
+
+    return [c for c in (c.strip() for c in chunks) if c]
+
+
 async def generate_image_prompts(
     llm_service,
     narrations: List[str],
