@@ -719,9 +719,11 @@ class AssetBasedPipeline(LinearVideoPipeline):
         # Collect video segments from storyboard frames
         scene_videos = [frame.video_segment_path for frame in context.storyboard.frames]
         
-        # Generate filename: use title if provided, otherwise use task_id or default name
-        if context.title:
-            filename = f"{context.title}.mp4"
+        # Generate filename: use title if provided, otherwise use task_id or default name.
+        # Sanitize the title so illegal characters (e.g. ':' '/' '?') don't break the path.
+        from pixelle_video.utils.os_util import sanitize_filename
+        if context.title and sanitize_filename(context.title, default=""):
+            filename = f"{sanitize_filename(context.title)}.mp4"
         else:
             filename = f"{context.task_id}.mp4"  # Use task_id as filename when title is empty
         

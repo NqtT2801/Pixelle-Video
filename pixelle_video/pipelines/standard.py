@@ -417,9 +417,15 @@ class StandardPipeline(LinearVideoPipeline):
         
         storyboard = ctx.storyboard
         segment_paths = [frame.video_segment_path for frame in storyboard.frames]
-        
+
         video_service = VideoService()
-        
+
+        # Name the output after the content title (from the Story Shortener / storyboard)
+        # instead of a generic "final.mp4". Falls back to "final.mp4" when there's no
+        # usable title. (When the caller passed an explicit output_path, we still copy
+        # there below.)
+        ctx.final_video_path = get_task_final_video_path(ctx.task_id, storyboard.title)
+
         final_video_path = video_service.concat_videos(
             videos=segment_paths,
             output=ctx.final_video_path,

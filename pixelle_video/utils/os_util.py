@@ -19,6 +19,7 @@ Inspired by Pixelle-MCP's os_util.py.
 
 import os
 import random
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple, Literal
@@ -308,21 +309,63 @@ def get_task_frame_path(
     return get_task_path(task_id, "frames", filename)
 
 
-def get_task_final_video_path(task_id: str) -> str:
+def sanitize_filename(name: str, max_length: int = 100, default: str = "final") -> str:
     """
-    Get final video path within task directory
-    
+    Turn an arbitrary title into a safe cross-platform filename stem (no extension).
+
+    Removes characters illegal on Windows (``< > : " / \\ | ? *``) and control
+    characters, collapses whitespace to single spaces, and trims trailing dots/spaces
+    (also illegal on Windows). Truncates to ``max_length`` characters. Falls back to
+    ``default`` when nothing usable remains (e.g. an empty or all-symbol title).
+
+    Args:
+        name: Raw title text.
+        max_length: Maximum length of the returned stem.
+        default: Fallback stem when the sanitized result is empty.
+
+    Returns:
+        A filesystem-safe filename stem (without extension).
+
+    Example:
+        >>> sanitize_filename('Chuyện tình: 10 năm / tha thứ?')
+        'Chuyện tình 10 năm  tha thứ'
+    """
+    if not name:
+        return default
+    # Drop illegal (Windows-reserved) and control characters.
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", name)
+    # Collapse any run of whitespace into a single space.
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    # Windows disallows trailing dots/spaces in names.
+    cleaned = cleaned.rstrip(". ").strip()
+    if len(cleaned) > max_length:
+        cleaned = cleaned[:max_length].rstrip(". ").strip()
+    return cleaned or default
+
+
+def get_task_final_video_path(task_id: str, title: Optional[str] = None) -> str:
+    """
+    Get final video path within task directory.
+
+    When ``title`` is provided it is sanitized (see :func:`sanitize_filename`) and used
+    as the filename so outputs are named after the content (e.g. the Story Shortener
+    title) instead of a generic ``final.mp4``.
+
     Args:
         task_id: Task ID
-    
+        title: Optional content title used as the filename stem.
+
     Returns:
         Absolute path to final video
-        
+
     Example:
         >>> get_task_final_video_path("20251028_143052_ab3d")
         >>> # Returns: ".../output/20251028_143052_ab3d/final.mp4"
+        >>> get_task_final_video_path("20251028_143052_ab3d", "Chuyện tình 10 năm")
+        >>> # Returns: ".../output/20251028_143052_ab3d/Chuyện tình 10 năm.mp4"
     """
-    return get_task_path(task_id, "final.mp4")
+    stem = sanitize_filename(title) if title else "final"
+    return get_task_path(task_id, f"{stem}.mp4")
 
 
 # ========== Resource Management (Templates/BGM/Workflows) ==========
