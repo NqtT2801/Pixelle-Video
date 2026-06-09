@@ -24,7 +24,7 @@ from loguru import logger
 
 from pixelle_video.services.comfy_base_service import ComfyBaseService
 from pixelle_video.utils.tts_util import edge_tts
-from pixelle_video.tts_voices import speed_to_rate
+from pixelle_video.tts_voices import speed_to_rate, resolve_custom_voice
 
 
 class TTSService(ComfyBaseService):
@@ -116,12 +116,16 @@ class TTSService(ComfyBaseService):
         
         # Route to appropriate implementation
         if mode == "local":
-            return await self._call_local_tts(
+            result_path = await self._call_local_tts(
                 text=text,
                 voice=voice,
                 speed=speed,
                 output_path=output_path
             )
+            # Normalize loudness so every voice (clones + Edge) is at the same
+            # standard level (F5 otherwise tracks each reference clip's loudness).
+            target_lufs = self.config.get("local", {}).get("target_lufs", -16.0)
+            return await self._normalize_loudness(result_path, target_lufs)
         else:  # comfyui
             # 1. Resolve workflow (returns structured info)
             workflow_info = self._resolve_workflow(workflow=workflow)
@@ -138,6 +142,87 @@ class TTSService(ComfyBaseService):
                 **params
             )
     
+    async def _normalize_loudness(self, path: str, target_lufs: float = -16.0) -> str:
+        """
+        Normalize a narration audio file to a standard integrated loudness (EBU R128),
+        so every voice comes out at the same level regardless of the source/reference.
+
+        Two-pass ffmpeg ``loudnorm`` (measure, then correct with linear=true) for
+        accurate, consistent targeting. On any failure (or if disabled via a falsy
+        target_lufs) the original file is left untouched. Returns the path.
+        """
+        if not target_lufs:
+            return path
+
+        import asyncio
+        return await asyncio.to_thread(self._level_to_target, path, float(target_lufs))
+
+    def _measure_lufs(self, path: str) -> Optional[float]:
+        """Measure integrated loudness (LUFS) of a file via ffmpeg loudnorm."""
+        import json
+        import re
+        import subprocess
+        r = subprocess.run(
+            ["ffmpeg", "-i", path, "-af", "loudnorm=I=-16:print_format=json",
+             "-f", "null", "-"],
+            capture_output=True, text=True,
+        )
+        m = re.search(r"\{[\s\S]*?\}", r.stderr)
+        if not m:
+            return None
+        try:
+            val = float(json.loads(m.group(0))["input_i"])
+        except (ValueError, KeyError, json.JSONDecodeError):
+            return None
+        return val if val > -70 else None  # -inf/near-silence -> skip
+
+    def _level_to_target(self, path: str, target_lufs: float) -> str:
+        """
+        Bring a clip to an exact integrated loudness, in place.
+
+        Two stages because plain ``loudnorm`` won't boost peaky speech past its
+        true-peak ceiling:
+          1) ``loudnorm`` (TP-safe) does the bulk normalization,
+          2) a corrective ``volume`` gain + ``alimiter`` hits the exact target.
+        Falls back gracefully (keeps the best available result) on any error.
+        """
+        import subprocess
+
+        s1 = f"{path}.s1.mp3"
+        s2 = f"{path}.s2.mp3"
+        try:
+            # Stage 1: TP-safe bulk loudness normalization
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", path,
+                 "-af", f"loudnorm=I={target_lufs}:TP=-1.5:LRA=11",
+                 "-ar", "44100", "-loglevel", "error", s1],
+                check=True, capture_output=True, text=True,
+            )
+
+            # Stage 2: measure residual and apply exact corrective gain + limiter
+            measured = self._measure_lufs(s1)
+            if measured is None:
+                os.replace(s1, path)
+                return path
+            gain = target_lufs - measured
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", s1,
+                 "-af", f"volume={gain:.2f}dB,alimiter=limit=0.95",
+                 "-ar", "44100", "-loglevel", "error", s2],
+                check=True, capture_output=True, text=True,
+            )
+            os.replace(s2, path)
+        except Exception as e:
+            logger.warning(f"Loudness normalization skipped ({e}); keeping original")
+        finally:
+            for tmp in (s1, s2):
+                try:
+                    if os.path.exists(tmp):
+                        os.unlink(tmp)
+                except OSError:
+                    pass
+        return path
+
     async def _call_local_tts(
         self,
         text: str,
@@ -161,23 +246,37 @@ class TTSService(ComfyBaseService):
         local_config = self.config.get("local", {})
         
         # Determine voice and speed (param > config)
-        final_voice = voice or local_config.get("voice", "zh-CN-YunjianNeural")
+        final_voice = voice or local_config.get("voice", "vi-VN-NamMinhNeural")
         final_speed = speed if speed is not None else local_config.get("speed", 1.2)
-        
+
         # Convert speed to rate parameter
         rate = speed_to_rate(final_speed)
-        
-        logger.info(f"🎙️  Using local Edge TTS: voice={final_voice}, speed={final_speed}x (rate={rate})")
-        
+
         # Generate output path if not provided
         if not output_path:
             # Generate unique filename
             unique_id = uuid.uuid4().hex
             output_path = f"output/{unique_id}.mp3"
-            
+
             # Ensure output directory exists
             Path("output").mkdir(parents=True, exist_ok=True)
-        
+
+        # Cloned voice: route to the configured clone engine.
+        #   vixtts   -> true zero-shot cloning (timbre + intonation), Vietnamese
+        #   openvoice -> Edge TTS base + OpenVoice tone-color conversion (fallback)
+        custom = resolve_custom_voice(final_voice)
+        if custom:
+            engine = local_config.get("clone_engine", "f5tts")
+            if engine == "f5tts":
+                return await self._call_f5tts(text, custom, final_speed, output_path)
+            if engine == "knnvc":
+                return await self._call_knnvc(text, custom, final_speed, output_path)
+            if engine == "vixtts":
+                return await self._call_vixtts(text, custom, final_speed, output_path)
+            return await self._call_cloned_tts(text, custom, rate, output_path)
+
+        logger.info(f"🎙️  Using local Edge TTS: voice={final_voice}, speed={final_speed}x (rate={rate})")
+
         # Call Edge TTS
         try:
             audio_bytes = await edge_tts(
@@ -193,7 +292,271 @@ class TTSService(ComfyBaseService):
         except Exception as e:
             logger.error(f"Local TTS generation error: {e}")
             raise
-    
+
+    async def _call_f5tts(
+        self,
+        text: str,
+        custom: dict,
+        speed: float,
+        output_path: str,
+    ) -> str:
+        """
+        Generate a cloned voice with F5-TTS Vietnamese (in-context cloning).
+
+        F5-TTS clones the reference's timbre AND Northern accent directly from
+        ``custom["ref"]`` and speaks Vietnamese natively. Returns output_path (mp3).
+        """
+        import asyncio
+
+        ref_path = custom["ref"]
+        logger.info(f"🧬 Cloned voice '{custom['id']}' via F5-TTS -> ref={ref_path}")
+
+        from pixelle_video.services.f5tts_service import F5TTSEngine
+        engine = F5TTSEngine()
+        # Speed/quality knobs (config): nfe_step (diffusion steps), ref_sec (reference
+        # length — the dominant cost on CPU), quantize (int8).
+        local_cfg = self.config.get("local", {})
+        nfe = int(local_cfg.get("clone_nfe_step", 16))
+        ref_sec = float(local_cfg.get("clone_ref_sec", 7.0))
+        quantize = bool(local_cfg.get("clone_quantize", False))
+        out_wav = f"{output_path}.f5.wav"
+        try:
+            await asyncio.to_thread(
+                engine.synthesize, text, ref_path, out_wav, speed, nfe, ref_sec, quantize
+            )
+
+            import ffmpeg
+            (
+                ffmpeg
+                .input(out_wav)
+                .output(output_path, loglevel="error")
+                .overwrite_output()
+                .run()
+            )
+        finally:
+            try:
+                if os.path.exists(out_wav):
+                    os.unlink(out_wav)
+            except OSError:
+                pass
+
+        logger.info(f"✅ Generated cloned audio (F5-TTS): {output_path}")
+        return output_path
+
+    async def _call_knnvc(
+        self,
+        text: str,
+        custom: dict,
+        speed: float,
+        output_path: str,
+    ) -> str:
+        """
+        Generate a cloned voice with a Northern Vietnamese base TTS + kNN-VC.
+
+        The base (gTTS Vietnamese, which is Northern/Hanoi — the Edge vi-VN voices
+        are Southern) provides the Vietnamese pronunciation/accent; kNN-VC then
+        converts only the timbre to the reference clip. Returns output_path (mp3).
+        """
+        import asyncio
+
+        ref_path = custom["ref"]
+        logger.info(f"🧬 Cloned voice '{custom['id']}' via kNN-VC -> timbre={ref_path}")
+
+        # 1. Northern Vietnamese base speech
+        base_path = f"{output_path}.base.mp3"
+        await self._synthesize_clone_base(text, custom, speed, base_path)
+
+        # 2. kNN-VC timbre conversion (blocking torch -> run in thread)
+        from pixelle_video.services.knnvc_service import KNNVCConverter
+        converter = KNNVCConverter()
+        converted_wav = f"{output_path}.knn.wav"
+        try:
+            await asyncio.to_thread(
+                converter.convert, base_path, ref_path, converted_wav
+            )
+
+            # 3. Transcode converted wav to the requested mp3 output path
+            import ffmpeg
+            (
+                ffmpeg
+                .input(converted_wav)
+                .output(output_path, loglevel="error")
+                .overwrite_output()
+                .run()
+            )
+        finally:
+            for tmp in (base_path, converted_wav):
+                try:
+                    if os.path.exists(tmp):
+                        os.unlink(tmp)
+                except OSError:
+                    pass
+
+        logger.info(f"✅ Generated cloned audio (kNN-VC): {output_path}")
+        return output_path
+
+    async def _synthesize_clone_base(
+        self,
+        text: str,
+        custom: dict,
+        speed: float,
+        output_mp3: str,
+    ) -> str:
+        """
+        Synthesize the clone's base speech (pronunciation/accent), before timbre
+        conversion. Defaults to gTTS Vietnamese (Northern); falls back to the Edge
+        base voice if ``base_engine == "edge"``.
+        """
+        import asyncio
+
+        base_engine = custom.get("base_engine", "gtts")
+
+        if base_engine == "gtts":
+            from gtts import gTTS
+
+            lang = custom.get("base_lang", "vi")
+
+            def _gen():
+                gTTS(text, lang=lang).save(output_mp3)
+
+            await asyncio.to_thread(_gen)
+
+            # gTTS has no speed control -> adjust tempo with ffmpeg if needed
+            if speed and abs(speed - 1.0) > 0.01:
+                import ffmpeg
+                tempo = max(0.5, min(2.0, speed))
+                adjusted = f"{output_mp3}.spd.mp3"
+                (
+                    ffmpeg
+                    .input(output_mp3)
+                    .output(adjusted, **{"filter:a": f"atempo={tempo}"}, loglevel="error")
+                    .overwrite_output()
+                    .run()
+                )
+                os.replace(adjusted, output_mp3)
+        else:  # edge fallback (note: Edge vi-VN is Southern)
+            rate = speed_to_rate(speed)
+            await edge_tts(
+                text=text, voice=custom["base"], rate=rate, output_path=output_mp3
+            )
+
+        return output_mp3
+
+    async def _call_vixtts(
+        self,
+        text: str,
+        custom: dict,
+        speed: float,
+        output_path: str,
+    ) -> str:
+        """
+        Generate a cloned voice with viXTTS (true Vietnamese zero-shot cloning).
+
+        Args:
+            text: Text to synthesize
+            custom: Custom-voice config (keys: id, name, ref, ...)
+            speed: Speech speed multiplier
+            output_path: Final audio path (mp3)
+
+        Returns:
+            Generated audio file path (output_path)
+        """
+        import asyncio
+
+        ref_path = custom["ref"]
+        logger.info(f"🧬 Cloned voice '{custom['id']}' via viXTTS -> timbre={ref_path}")
+
+        from pixelle_video.services.vixtts_service import ViXTTSEngine
+        engine = ViXTTSEngine()
+        out_wav = f"{output_path}.vixtts.wav"
+        try:
+            # Blocking torch inference -> run in a thread
+            await asyncio.to_thread(
+                engine.synthesize, text, ref_path, out_wav, speed, "vi"
+            )
+
+            # Transcode the 24kHz wav to the requested mp3 output path
+            import ffmpeg
+            (
+                ffmpeg
+                .input(out_wav)
+                .output(output_path, loglevel="error")
+                .overwrite_output()
+                .run()
+            )
+        finally:
+            try:
+                if os.path.exists(out_wav):
+                    os.unlink(out_wav)
+            except OSError:
+                pass
+
+        logger.info(f"✅ Generated cloned audio (viXTTS): {output_path}")
+        return output_path
+
+    async def _call_cloned_tts(
+        self,
+        text: str,
+        custom: dict,
+        rate: str,
+        output_path: str,
+    ) -> str:
+        """
+        Generate a cloned voice: Edge TTS produces the speech with a base voice,
+        then OpenVoice converts the timbre to the reference clip (custom["ref"]).
+
+        Args:
+            text: Text to synthesize
+            custom: Custom-voice config (keys: id, name, ref, base, ...)
+            rate: Edge TTS rate string (from speed)
+            output_path: Final audio path (mp3)
+
+        Returns:
+            Generated audio file path (output_path)
+        """
+        import asyncio
+
+        base_voice = custom["base"]
+        ref_path = custom["ref"]
+        logger.info(
+            f"🧬 Cloned voice '{custom['id']}': Edge base={base_voice} -> timbre={ref_path}"
+        )
+
+        # 1. Synthesize base speech with Edge TTS (good Vietnamese pronunciation)
+        base_path = f"{output_path}.base.mp3"
+        await edge_tts(text=text, voice=base_voice, rate=rate, output_path=base_path)
+
+        # 2. Convert timbre to the reference clip (blocking torch -> run in thread)
+        from pixelle_video.services.voice_conversion import OpenVoiceConverter
+        converter = OpenVoiceConverter()
+        # Lower tau preserves the Edge base's Northern pronunciation/clarity.
+        tau = float(self.config.get("local", {}).get("clone_tau", 0.25))
+        converted_wav = f"{output_path}.conv.wav"
+        try:
+            await asyncio.to_thread(
+                converter.convert, base_path, base_voice, ref_path, converted_wav, tau
+            )
+
+            # 3. Transcode the converted wav to the requested mp3 output path
+            import ffmpeg
+            (
+                ffmpeg
+                .input(converted_wav)
+                .output(output_path, loglevel="error")
+                .overwrite_output()
+                .run()
+            )
+        finally:
+            for tmp in (base_path, converted_wav):
+                try:
+                    if os.path.exists(tmp):
+                        os.unlink(tmp)
+                except OSError:
+                    pass
+
+        logger.info(f"✅ Generated cloned audio: {output_path}")
+        return output_path
+
     async def _call_comfyui_workflow(
         self,
         workflow_info: dict,

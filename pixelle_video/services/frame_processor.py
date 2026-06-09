@@ -349,17 +349,41 @@ class FrameProcessor:
         if frame.media_type == "video":
             # Video workflow: overlay HTML template on video, then add audio
             logger.debug(f"  → Using video-based composition with HTML overlay")
-            
+
             # Step 1: Overlay transparent HTML image on video
             # The composed_image_path contains the rendered HTML with transparent background
             temp_video_with_overlay = get_task_frame_path(config.task_id, frame.index, "video") + "_overlay.mp4"
-            
-            video_service.overlay_image_on_video(
-                video=frame.video_path,
-                overlay_image=frame.composed_image_path,
-                output=temp_video_with_overlay,
-                scale_mode="contain"  # Scale video to fit template size (contain mode)
+
+            # If the template declares a video window rect, place the video into
+            # that window (subtitle sits below it). Otherwise fall back to the
+            # full-frame overlay.
+            from pixelle_video.utils.template_util import (
+                parse_template_video_region, resolve_template_path, parse_template_size
             )
+            region = parse_template_video_region(
+                resolve_template_path(config.frame_template)
+            )
+
+            if region:
+                canvas_w, canvas_h = parse_template_size(
+                    resolve_template_path(config.frame_template)
+                )
+                video_service.composite_video_in_region(
+                    video=frame.video_path,
+                    overlay_image=frame.composed_image_path,
+                    output=temp_video_with_overlay,
+                    region=region,
+                    canvas_size=(canvas_w, canvas_h),
+                    bg_color=region.get("bg_color", "#000000"),
+                    fps=config.video_fps,
+                )
+            else:
+                video_service.overlay_image_on_video(
+                    video=frame.video_path,
+                    overlay_image=frame.composed_image_path,
+                    output=temp_video_with_overlay,
+                    scale_mode="contain"  # Scale video to fit template size (contain mode)
+                )
             
             # Step 2: Add narration audio to the overlaid video
             # Note: The video might have audio (replaced) or be silent (audio added)

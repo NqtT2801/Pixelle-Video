@@ -16,7 +16,24 @@ TTS Voice Configuration
 Defines available voices for local Edge TTS inference.
 """
 
-from typing import List, Dict, Any
+import os
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+
+
+# ---------------------------------------------------------------------------
+# Custom cloned voices (Edge TTS base + OpenVoice tone-color conversion)
+# ---------------------------------------------------------------------------
+# Any audio file dropped into `voices/` becomes a selectable voice. Selecting it
+# generates speech with `DEFAULT_CLONE_BASE` (Edge TTS) and then converts the
+# timbre to that reference clip via OpenVoice. See
+# `pixelle_video.services.voice_conversion`.
+VOICES_DIR = "voices"
+CLONE_VOICE_PREFIX = "clone:"
+# Northern Vietnamese male Edge voice used to drive pronunciation/prosody before
+# the timbre is converted to the reference clip.
+DEFAULT_CLONE_BASE = "vi-VN-NamMinhNeural"
+_CLONE_AUDIO_EXTS = (".mp3", ".wav", ".flac", ".m4a", ".ogg")
 
 
 # Edge TTS voice presets for local inference
@@ -209,21 +226,77 @@ EDGE_TTS_VOICES: List[Dict[str, Any]] = [
 ]
 
 
+def list_custom_voices() -> List[Dict[str, Any]]:
+    """
+    Scan the ``voices/`` directory for reference clips and expose each one as a
+    selectable cloned voice.
+
+    Dropping ``voices/<name>.mp3`` makes a voice ``clone:<name>`` available; at
+    synthesis time it is produced with the Edge base voice ``DEFAULT_CLONE_BASE``
+    and converted to the reference timbre via OpenVoice.
+
+    Returns:
+        List of voice configs with keys: id, name, ref, base, locale, gender.
+    """
+    voices_dir = Path(VOICES_DIR)
+    if not voices_dir.is_dir():
+        return []
+
+    custom: List[Dict[str, Any]] = []
+    for path in sorted(voices_dir.iterdir()):
+        if path.name.startswith(".") or not path.is_file():
+            continue
+        if path.suffix.lower() not in _CLONE_AUDIO_EXTS:
+            continue
+        stem = path.stem
+        custom.append({
+            "id": f"{CLONE_VOICE_PREFIX}{stem}",
+            "name": f"{stem} (clone)",
+            "ref": str(path).replace("\\", "/"),
+            # Base TTS that provides pronunciation/accent before timbre conversion.
+            # gTTS Vietnamese is Northern (Hanoi); the Edge vi-VN voices are Southern,
+            # so we use gTTS as the base for a Northern clone.
+            "base_engine": "gtts",
+            "base_lang": "vi",
+            "base": DEFAULT_CLONE_BASE,  # Edge fallback (Southern) if base_engine="edge"
+            "locale": "vi-VN",
+            # Gender is unknown for an arbitrary dropped clip and unused by the default
+            # f5tts engine (it clones gender straight from the reference).
+            "gender": "unknown",
+        })
+    return custom
+
+
+def resolve_custom_voice(voice_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """
+    Return the custom-voice config for a ``clone:<name>`` id, or None if the id is
+    not a cloned voice (e.g. a normal Edge voice).
+    """
+    if not voice_id or not voice_id.startswith(CLONE_VOICE_PREFIX):
+        return None
+    return next((v for v in list_custom_voices() if v["id"] == voice_id), None)
+
+
 def get_voice_display_name(voice_id: str, tr_func=None, locale: str = "zh_CN") -> str:
     """
     Get display name for voice
-    
+
     Args:
         voice_id: Voice ID (e.g., "zh-CN-YunjianNeural")
         tr_func: Translation function (optional)
         locale: Current locale (default: "zh_CN")
-    
+
     Returns:
         Display name (translated label if in Chinese, otherwise voice ID)
     """
+    # Cloned voices: show their friendly name (e.g. "quan (clone)")
+    custom = resolve_custom_voice(voice_id)
+    if custom:
+        return custom["name"]
+
     # Find voice config
     voice_config = next((v for v in EDGE_TTS_VOICES if v["id"] == voice_id), None)
-    
+
     if not voice_config:
         return voice_id
     

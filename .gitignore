@@ -63,6 +63,9 @@ temp/
 tmp/
 .cache/
 
+# Local model checkpoints (e.g. OpenVoice voice-cloning converter)
+models/
+
 # MkDocs build output
 site/
 

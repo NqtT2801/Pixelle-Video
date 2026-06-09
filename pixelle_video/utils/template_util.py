@@ -88,6 +88,60 @@ def parse_template_size(template_path: str) -> Tuple[int, int]:
         )
 
 
+def parse_template_video_region(template_path: str) -> Optional[dict]:
+    """
+    Parse the video placement window from a template's meta tags.
+
+    Looks for:
+        <meta name="template:video-x" content="40">
+        <meta name="template:video-y" content="40">
+        <meta name="template:video-w" content="1000">
+        <meta name="template:video-h" content="1000">
+        <meta name="template:bg-color" content="#fdf6ec">  (optional)
+
+    When present, the compositing pipeline places the AI video into this rect on a
+    background canvas instead of full-frame. Returns a dict
+    {x, y, w, h, bg_color} or None if the rect tags are absent/incomplete.
+    """
+    import re
+
+    # Resolve to an existing file path if needed
+    path = Path(template_path)
+    if not path.exists():
+        try:
+            path = Path(resolve_template_path(template_path))
+        except Exception:
+            return None
+    if not path.exists():
+        return None
+
+    try:
+        html = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+    def _meta(name: str) -> Optional[str]:
+        m = re.search(
+            r'<meta\s+name=["\']template:' + re.escape(name) +
+            r'["\']\s+content=["\']([^"\']+)["\']',
+            html, re.IGNORECASE,
+        )
+        return m.group(1).strip() if m else None
+
+    try:
+        x, y, w, h = (_meta("video-x"), _meta("video-y"),
+                      _meta("video-w"), _meta("video-h"))
+        if None in (x, y, w, h):
+            return None
+        region = {"x": int(x), "y": int(y), "w": int(w), "h": int(h)}
+    except (TypeError, ValueError):
+        return None
+
+    bg = _meta("bg-color") or "#000000"
+    region["bg_color"] = bg
+    return region
+
+
 def list_available_sizes() -> List[str]:
     """
     List all available video sizes (merged from templates/ and data/templates/)

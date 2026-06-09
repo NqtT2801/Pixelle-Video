@@ -63,24 +63,30 @@ def render_style_config(pixelle_video):
         # ================================================================
         if tts_mode == "local":
             # Import voice configuration
-            from pixelle_video.tts_voices import EDGE_TTS_VOICES, get_voice_display_name
-            
+            from pixelle_video.tts_voices import (
+                EDGE_TTS_VOICES, get_voice_display_name, list_custom_voices
+            )
+
             # Get saved voice from config
             local_config = tts_config.get("local", {})
             saved_voice = local_config.get("voice", "vi-VN-HoaiMyNeural")
             saved_speed = local_config.get("speed", 1.2)
-            
-            # Build voice options with i18n
+
+            # Build voice options with i18n.
+            # Cloned voices from voices/ (e.g. "quan (clone)") come first.
             voice_options = []
             voice_ids = []
             default_voice_index = 0
-            
-            for idx, voice_config in enumerate(EDGE_TTS_VOICES):
+
+            all_voices = [
+                {"id": v["id"]} for v in list_custom_voices()
+            ] + EDGE_TTS_VOICES
+            for idx, voice_config in enumerate(all_voices):
                 voice_id = voice_config["id"]
                 display_name = get_voice_display_name(voice_id, tr, get_language())
                 voice_options.append(display_name)
                 voice_ids.append(voice_id)
-                
+
                 # Set default index if matches saved voice
                 if voice_id == saved_voice:
                     default_voice_index = idx

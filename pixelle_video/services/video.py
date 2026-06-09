@@ -597,7 +597,86 @@ class VideoService:
             error_msg = e.stderr.decode() if e.stderr else str(e)
             logger.error(f"FFmpeg overlay error: {error_msg}")
             raise RuntimeError(f"Failed to overlay image on video: {error_msg}")
-    
+
+    def composite_video_in_region(
+        self,
+        video: str,
+        overlay_image: str,
+        output: str,
+        region: dict,
+        canvas_size: tuple = (1080, 1920),
+        bg_color: str = "#fdf6ec",
+        fps: int = 30,
+    ) -> str:
+        """
+        Place a video into a fixed rectangular window on a solid-color canvas, then
+        overlay a transparent template image (subtitles/decorations) on top.
+
+        Unlike overlay_image_on_video (which scales the video to fill the whole
+        frame), this confines the video to ``region`` so the template can show the
+        subtitle below it without overlapping.
+
+        Args:
+            video: Source video file path
+            overlay_image: Transparent template PNG (canvas-sized)
+            output: Output video file path
+            region: {"x", "y", "w", "h"} window rect in canvas pixels
+            canvas_size: (width, height) of the output canvas
+            bg_color: Canvas background color (area outside the video window)
+            fps: Output frame rate
+
+        Returns:
+            Path to the output video file (video only; add audio separately)
+        """
+        self._ensure_ffmpeg()
+        x, y, w, h = region["x"], region["y"], region["w"], region["h"]
+        cw, ch = canvas_size
+        duration = self._get_video_duration(video)
+        logger.info(
+            f"Compositing video into window {w}x{h}@({x},{y}) on {cw}x{ch} canvas"
+        )
+
+        try:
+            # Cream (or configured) background canvas, matched to the video length
+            base = ffmpeg.input(
+                f"color=c={bg_color}:s={cw}x{ch}:r={fps}:d={duration:.3f}",
+                f="lavfi",
+            )
+
+            # Scale the video to fit (contain) inside the window
+            scaled = ffmpeg.input(video).video.filter(
+                "scale", w, h, force_original_aspect_ratio="decrease"
+            )
+
+            # Center the scaled video inside the window rect
+            x_expr = f"{x}+({w}-overlay_w)/2"
+            y_expr = f"{y}+({h}-overlay_h)/2"
+            with_video = ffmpeg.overlay(base, scaled, x=x_expr, y=y_expr)
+
+            # Overlay the transparent template (subtitle/decorations) on top
+            overlaid = ffmpeg.overlay(with_video, ffmpeg.input(overlay_image), x=0, y=0)
+
+            (
+                ffmpeg
+                .output(
+                    overlaid, output,
+                    vcodec="libx264",
+                    pix_fmt="yuv420p",
+                    preset="medium",
+                    crf=23,
+                    t=duration,
+                )
+                .overwrite_output()
+                .run(capture_stdout=True, capture_stderr=True)
+            )
+
+            logger.success(f"Video composited in region: {output}")
+            return output
+        except ffmpeg.Error as e:
+            error_msg = e.stderr.decode() if e.stderr else str(e)
+            logger.error(f"FFmpeg region-composite error: {error_msg}")
+            raise RuntimeError(f"Failed to composite video in region: {error_msg}")
+
     def create_video_from_image(
         self,
         image: str,
@@ -679,10 +758,12 @@ class VideoService:
         video: str,
         bgm: str,
         output: str,
-        bgm_volume: float = 0.3,
+        bgm_volume: float = 0.13,
         loop: bool = True,
         fade_in: float = 0.0,
         fade_out: float = 0.0,
+        voice_volume: float = 1.0,
+        bgm_target_lufs: float = -16.0,
     ) -> str:
         """
         Add background music to video
@@ -719,8 +800,15 @@ class VideoService:
                 stream_loop=-1 if loop else 0  # -1 = infinite loop
             )
             
-            # Apply volume adjustment to BGM
-            bgm_audio = bgm_input.audio.filter('volume', bgm_volume)
+            # Normalize the BGM to the voice's loudness target first (file-independent),
+            # THEN apply bgm_volume as a voice-relative fraction. So bgm_volume=0.13 ->
+            # BGM ≈ voice + 20*log10(0.13) ≈ 17.7 dB below the (standardized) voice,
+            # regardless of how loud the BGM file itself is.
+            bgm_audio = (
+                bgm_input.audio
+                .filter('loudnorm', i=bgm_target_lufs, tp=-1.5, lra=11)
+                .filter('volume', bgm_volume)
+            )
             
             # Apply fade effects if specified
             if fade_in > 0:
@@ -732,13 +820,23 @@ class VideoService:
             # 2. Calculate fade_out start time
             # 3. Apply fade filter with specific start_time
             
-            # Mix original audio with BGM
+            # Boost the narration so it sits clearly above the BGM
+            voice_audio = input_video.audio.filter('volume', voice_volume)
+
+            # Mix narration with BGM.
+            # normalize=0 is important: amix's default (normalize=1) divides EVERY
+            # input by the number of inputs, which halved the narration and let the
+            # BGM bury it. With normalize=0 the (boosted) voice stays loud and the BGM
+            # stays at its relative volume; a limiter then prevents clipping.
             mixed_audio = ffmpeg.filter(
-                [input_video.audio, bgm_audio],
+                [voice_audio, bgm_audio],
                 'amix',
                 inputs=2,
-                duration='first'  # Use video's duration
+                duration='first',  # Use video's duration
+                dropout_transition=0,
+                normalize=0,
             )
+            mixed_audio = mixed_audio.filter('alimiter', limit=0.95)
             
             (
                 ffmpeg
@@ -766,7 +864,7 @@ class VideoService:
         video: str,
         bgm_path: str,
         output: str,
-        volume: float = 0.2,
+        volume: float = 0.13,
         mode: Literal["once", "loop"] = "loop"
     ) -> str:
         """

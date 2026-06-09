@@ -433,3 +433,112 @@ class HTMLFrameGenerator:
             raise RuntimeError(
                 f"HTML rendering failed: {type(e).__name__}: {e}"
             ) from e
+
+
+def _hex_to_rgba(color: str) -> tuple:
+    """Parse '#rrggbb' (or '#rgb') into an (r, g, b, 255) tuple. Falls back to black."""
+    try:
+        c = color.strip().lstrip('#')
+        if len(c) == 3:
+            c = ''.join(ch * 2 for ch in c)
+        r, g, b = int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+        return (r, g, b, 255)
+    except Exception:
+        return (0, 0, 0, 255)
+
+
+async def render_template_preview(
+    template_path: str,
+    title: str,
+    text: str,
+    media_image: Optional[str] = None,
+    ext: Optional[Dict[str, Any]] = None,
+    output_path: Optional[str] = None,
+) -> str:
+    """
+    Render a representative preview of a template.
+
+    For image/static templates the image is part of the HTML, so this is just a
+    normal render. For video templates (transparent overlays whose video + cream
+    background are added later by the compositing pipeline), this simulates the
+    final composite: a placeholder image is placed into the video window over the
+    bg-color canvas, then the transparent overlay on top — so the preview matches
+    what a generated video frame looks like instead of an empty frame.
+
+    Args:
+        template_path: Resolved template file path
+        title, text: Preview content
+        media_image: Placeholder image (local path) for the video window
+        ext: Extra template params (e.g. custom params, index)
+        output_path: Optional output PNG path
+
+    Returns:
+        Path to the generated preview PNG.
+    """
+    from pixelle_video.utils.template_util import (
+        get_template_type, parse_template_size, parse_template_video_region
+    )
+
+    generator = HTMLFrameGenerator(template_path)
+    template_type = get_template_type(Path(template_path).name)
+
+    # Image/static templates embed {{image}} in the HTML -> render directly.
+    if template_type != "video":
+        return await generator.generate_frame(
+            title=title, text=text, image=media_image, ext=ext, output_path=output_path
+        )
+
+    # Video templates are transparent overlays: composite a placeholder image into
+    # the video window over the bg canvas, then the overlay (mirrors the runtime
+    # VideoService.composite_video_in_region / overlay_image_on_video).
+    from PIL import Image, ImageOps
+
+    overlay_png = await generator.generate_frame(
+        title=title, text=text, image=None, ext=ext
+    )
+
+    width, height = parse_template_size(template_path)
+    region = parse_template_video_region(template_path)
+    bg_color = region["bg_color"] if region else "#000000"
+
+    canvas = Image.new("RGBA", (width, height), _hex_to_rgba(bg_color))
+
+    # Paste the placeholder image (if a readable local file)
+    if media_image and not str(media_image).startswith(("http://", "https://", "data:")):
+        img_path = Path(media_image)
+        if not img_path.is_absolute():
+            img_path = Path.cwd() / img_path
+        if img_path.exists():
+            try:
+                media = Image.open(img_path).convert("RGBA")
+                if region:
+                    box = (region["w"], region["h"])
+                    origin = (region["x"], region["y"])
+                else:
+                    box = (width, height)
+                    origin = (0, 0)
+                fit = ImageOps.contain(media, box)
+                px = origin[0] + (box[0] - fit.width) // 2
+                py = origin[1] + (box[1] - fit.height) // 2
+                canvas.alpha_composite(fit, (px, py))
+            except Exception as e:
+                logger.warning(f"Preview placeholder image failed to load: {e}")
+
+    with Image.open(overlay_png) as overlay:
+        canvas.alpha_composite(overlay.convert("RGBA"))
+
+    # Remove the intermediate overlay render (we only keep the composited preview)
+    try:
+        os.unlink(overlay_png)
+    except OSError:
+        pass
+
+    if output_path is None:
+        from pixelle_video.utils.os_util import get_output_path
+        output_path = get_output_path(f"preview_{uuid.uuid4().hex[:16]}.png")
+    else:
+        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+
+    canvas.convert("RGB").save(output_path)
+    logger.info(f"Template preview generated: {output_path}")
+    return output_path

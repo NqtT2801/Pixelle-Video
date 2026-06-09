@@ -64,24 +64,30 @@ def render_style_config(pixelle_video):
         # ================================================================
         if tts_mode == "local":
             # Import voice configuration
-            from pixelle_video.tts_voices import EDGE_TTS_VOICES, get_voice_display_name
-            
+            from pixelle_video.tts_voices import (
+                EDGE_TTS_VOICES, get_voice_display_name, list_custom_voices
+            )
+
             # Get saved voice from config
             local_config = tts_config.get("local", {})
             saved_voice = local_config.get("voice", "vi-VN-HoaiMyNeural")
             saved_speed = local_config.get("speed", 1.2)
-            
-            # Build voice options with i18n
+
+            # Build voice options with i18n.
+            # Cloned voices from voices/ (e.g. "quan (clone)") come first.
             voice_options = []
             voice_ids = []
             default_voice_index = 0
-            
-            for idx, voice_config in enumerate(EDGE_TTS_VOICES):
+
+            all_voices = [
+                {"id": v["id"]} for v in list_custom_voices()
+            ] + EDGE_TTS_VOICES
+            for idx, voice_config in enumerate(all_voices):
                 voice_id = voice_config["id"]
                 display_name = get_voice_display_name(voice_id, tr, get_language())
                 voice_options.append(display_name)
                 voice_ids.append(voice_id)
-                
+
                 # Set default index if matches saved voice
                 if voice_id == saved_voice:
                     default_voice_index = idx
@@ -634,27 +640,29 @@ def render_style_config(pixelle_video):
             if st.button(tr("template.preview_button"), key="btn_preview_template", use_container_width=True):
                 with st.spinner(tr("template.preview_generating")):
                     try:
-                        from pixelle_video.services.frame_html import HTMLFrameGenerator
+                        from pixelle_video.services.frame_html import render_template_preview
 
                         # Use the currently selected template (size is auto-parsed)
                         from pixelle_video.utils.template_util import resolve_template_path
                         template_path = resolve_template_path(frame_template)
-                        generator = HTMLFrameGenerator(template_path)
-                        
+
                         # Build ext dict with auto-injected parameters (same as FrameProcessor)
                         ext = {
                             "index": 1,  # Preview uses index 1
                         }
-                        
+
                         # Add custom parameters from user input
                         if custom_values_for_video:
                             ext.update(custom_values_for_video)
-                        
-                        # Generate preview
-                        preview_path = run_async(generator.generate_frame(
+
+                        # Generate preview. For video templates (transparent overlays),
+                        # this composites the placeholder image into the video window
+                        # over the bg canvas so the preview matches the final frame.
+                        preview_path = run_async(render_template_preview(
+                            template_path=template_path,
                             title=preview_title,
                             text=preview_text,
-                            image=preview_image,
+                            media_image=preview_image,
                             ext=ext
                         ))
                         

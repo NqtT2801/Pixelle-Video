@@ -244,7 +244,7 @@ def render_bgm_section(key_prefix=""):
                 tr("bgm.volume"),
                 min_value=0.0,
                 max_value=0.5,
-                value=0.2,
+                value=0.13,
                 step=0.01,
                 format="%.2f",
                 key=f"{key_prefix}bgm_volume_slider",
