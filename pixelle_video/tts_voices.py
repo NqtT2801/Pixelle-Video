@@ -254,6 +254,17 @@ VIENEU_VOICES: List[Dict[str, Any]] = [
 ]
 
 
+# Voices offered for selection in the "Voiceover" (section.tts) UI sections.
+# Curated subset of VIENEU_VOICES — the full registry above is kept intact so any
+# previously-saved voice id still resolves via resolve_vieneu_voice(); only the
+# selectable roster is narrowed here. Order here is the order shown in the dropdown.
+_VOICEOVER_VOICE_IDS = ("vieneu:Ngọc Linh", "vieneu:Đức Trí")
+VOICEOVER_VOICES: List[Dict[str, Any]] = [
+    next(v for v in VIENEU_VOICES if v["id"] == vid)
+    for vid in _VOICEOVER_VOICE_IDS
+]
+
+
 def list_custom_voices() -> List[Dict[str, Any]]:
     """
     Scan the ``voices/`` directory for reference clips and expose each one as a

@@ -65,7 +65,7 @@ def render_style_config(pixelle_video):
         if tts_mode == "local":
             # Import voice configuration
             from pixelle_video.tts_voices import (
-                VIENEU_VOICES, get_voice_display_name
+                VOICEOVER_VOICES, get_voice_display_name
             )
 
             # Get saved voice from config
@@ -73,14 +73,12 @@ def render_style_config(pixelle_video):
             saved_voice = local_config.get("voice", "vi-VN-HoaiMyNeural")
             saved_speed = local_config.get("speed", 1.0)
 
-            # Build voice options with i18n. Only VieNeu preset voices are offered.
+            # Build voice options with i18n. Only the curated Voiceover voices are offered.
             voice_options = []
             voice_ids = []
             default_voice_index = 0
 
-            # Quick Create only offers the Bình An and Ngọc Linh presets.
-            _quick_create_voice_ids = {"vieneu:Bình An", "vieneu:Ngọc Linh"}
-            all_voices = [v for v in VIENEU_VOICES if v["id"] in _quick_create_voice_ids]
+            all_voices = VOICEOVER_VOICES
             for idx, voice_config in enumerate(all_voices):
                 voice_id = voice_config["id"]
                 display_name = get_voice_display_name(voice_id, tr, get_language())

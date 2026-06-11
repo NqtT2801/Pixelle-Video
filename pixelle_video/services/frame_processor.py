@@ -517,10 +517,15 @@ class FrameProcessor:
                 audio_volume=1.0
             )
             
-            # Clean up temp file
+            # Clean up temp file (best-effort). On Windows the ffmpeg subprocess can
+            # briefly keep the handle open after returning, so a failed unlink must not
+            # abort the whole frame — the segment is already written at this point.
             import os
             if os.path.exists(temp_video_with_overlay):
-                os.unlink(temp_video_with_overlay)
+                try:
+                    os.unlink(temp_video_with_overlay)
+                except OSError as e:
+                    logger.warning(f"Could not remove temp overlay file {temp_video_with_overlay}: {e}")
         
         elif frame.media_type == "image" or frame.media_type is None:
             # Image workflow: Use composed image directly

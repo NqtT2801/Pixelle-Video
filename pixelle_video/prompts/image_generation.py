@@ -62,14 +62,22 @@ Based on the existing video script, create corresponding **English** image promp
 
 ## Image Prompt Specifications
 - Language: **Must use English** (for AI image generation models)
-- Description structure: scene + character action + emotion + symbolic elements
+- Description structure: scene + one clear main subject + character action + facial expression + emotion + simple setting
 - Description length: Ensure clear, complete, and creative descriptions (recommended 50-100 English words)
 
 ## Visual Creative Requirements
 - Each image must accurately reflect the specific content and emotion of the corresponding narration
-- Use symbolic techniques to visualize abstract concepts (e.g., use paths to represent life choices, chains to represent constraints, etc.)
-- Scenes should express rich emotions and actions to enhance visual impact
-- Highlight themes through composition and element arrangement, avoid overly literal representations
+- Depict the literal, concrete subject of the narration: show clear characters with readable facial expressions, body language, and a simple, real-world setting
+- Any symbolism must stay subtle and environmental (lighting, color, weather, posture, or a single small flat icon) and must be physically plausible — never an object that connects or tethers people together, and never a disembodied object floating in mid-air
+- Scenes should express rich emotions through the characters themselves to enhance visual impact
+- Prefer grounded, physically-plausible compositions; the main subject of the narration must be clearly recognizable at a glance
+
+## Avoid (these render badly and break the clean cartoon style)
+- No thin threads, strings, wires, ropes, or cords connecting, tethering, or linking people or body parts (image models render these as tangled string or as a person walking a tightrope)
+- No tightrope, wire-walking, or balancing-on-a-line imagery unless the narration is literally about that
+- No disembodied body parts or symbolic objects (hearts, rings, padlocks) floating or suspended in the air; if a symbol is truly needed, draw it as a small flat sticker/icon resting within the scene
+- Keep one clear focal subject — avoid crowded, surreal, multi-element compositions that fight the cute minimalist cartoon style
+- Do not render text, letters, words, or numbers inside the image
 
 ## Key English Vocabulary Reference
 - Symbolic elements: symbolic elements

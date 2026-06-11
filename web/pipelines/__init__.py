@@ -27,10 +27,6 @@ from web.pipelines.base import (
 # story_shortener is imported first so its tab appears leftmost
 from web.pipelines import story_shortener
 from web.pipelines import standard
-from web.pipelines import asset_based
-from web.pipelines import digital_human
-from web.pipelines import i2v
-from web.pipelines import action_transfer
 
 __all__ = [
     "PipelineUI",
