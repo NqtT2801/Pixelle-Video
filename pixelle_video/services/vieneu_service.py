@@ -94,18 +94,25 @@ class VieNeuEngine:
         output_wav: str,
         temperature: Optional[float] = None,
         seed: Optional[int] = None,
+        top_k: Optional[int] = None,
+        top_p: Optional[float] = None,
+        repetition_penalty: Optional[float] = None,
     ) -> str:
         """Synthesize ``text`` with the named preset ``voice_id``; write a 48 kHz wav.
 
         VieNeu has no speed control — tempo is adjusted by the caller (ffmpeg ``atempo``)
         when transcoding to the final mp3.
 
-        ``temperature`` / ``seed`` make the timbre consistent across calls. VieNeu's
-        token sampler is stochastic and unseeded by default, so independent segments
-        of the same video occasionally drift to a different-sounding voice. Seeding the
-        RNG (and lowering temperature) pins the preset speaker so every segment matches.
-        The CPU/ONNX backend samples via NumPy's global RNG (``np.random.choice``); the
-        CUDA/PyTorch backend uses ``torch.multinomial`` — so we seed both.
+        VieNeu v3 preset voices are *anchored* (fixed reference codes + a reserved speaker
+        token), so the timbre is pinned and all voice "drift" between segments of a video
+        comes from the autoregressive token sampler. The sampler is controlled by
+        ``temperature`` + ``top_k`` + ``top_p``: narrowing them (low temperature, small
+        top_k, low top_p) keeps every segment on the same preset speaker, and
+        ``temperature=0`` is fully deterministic (greedy argmax — no RNG). Left at None,
+        each knob falls back to VieNeu's own permissive default (temp 0.8 / top_k 25 /
+        top_p 0.95 / rep-pen 1.2), which drifts. The CPU/ONNX backend samples via NumPy's
+        global RNG (``np.random.choice``) and the CUDA/PyTorch backend uses
+        ``torch.multinomial`` — so ``seed`` pins both (only matters when temperature > 0).
         """
         model = self._ensure_model()
         os.makedirs(os.path.dirname(output_wav) or ".", exist_ok=True)
@@ -119,11 +126,17 @@ class VieNeuEngine:
             except ImportError:
                 pass  # torch-free ONNX backend: NumPy seed above is sufficient
 
-        # emotion uses the package default ("natural"). temperature defaults to the
-        # package value (0.8) when not overridden by the caller.
+        # emotion uses the package default ("natural"). Each sampler knob is forwarded only
+        # when set, so a None falls back to VieNeu's own infer() default.
         infer_kwargs = {"voice": voice_id}
         if temperature is not None:
             infer_kwargs["temperature"] = temperature
+        if top_k is not None:
+            infer_kwargs["top_k"] = top_k
+        if top_p is not None:
+            infer_kwargs["top_p"] = top_p
+        if repetition_penalty is not None:
+            infer_kwargs["repetition_penalty"] = repetition_penalty
         wav = model.infer(text, **infer_kwargs)
         model.save(wav, output_wav)
         logger.info(f"✅ VieNeu synthesized '{voice_id}': {output_wav}")

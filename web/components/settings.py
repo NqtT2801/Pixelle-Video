@@ -41,25 +41,24 @@ def render_advanced_settings():
                 # Quick preset selection
                 from pixelle_video.llm_presets import get_preset_names, get_preset, find_preset_by_base_url_and_model
                 
-                # Custom at the end
-                preset_names = get_preset_names() + ["Custom"]
-                
+                preset_names = get_preset_names()
+
                 # Get current config
                 current_llm = config_manager.get_llm_config()
-                
+
                 # Auto-detect which preset matches current config
                 current_preset = find_preset_by_base_url_and_model(
-                    current_llm["base_url"], 
+                    current_llm["base_url"],
                     current_llm["model"]
                 )
-                
+
                 # Determine default index based on current config
                 if current_preset:
                     # Current config matches a preset
                     default_index = preset_names.index(current_preset)
                 else:
-                    # Current config doesn't match any preset -> Custom
-                    default_index = len(preset_names) - 1
+                    # Current config doesn't match any preset -> first preset (OpenAI)
+                    default_index = 0
                 
                 selected_preset = st.selectbox(
                     tr("settings.llm.quick_select"),
@@ -70,31 +69,22 @@ def render_advanced_settings():
                 )
                 
                 # Auto-fill based on selected preset
-                if selected_preset != "Custom":
-                    # Preset selected
-                    preset_config = get_preset(selected_preset)
-                    
-                    # If user switched to a different preset (not current one), clear API key
-                    # If it's the same as current config, keep API key
-                    if selected_preset == current_preset:
-                        # Same preset as saved config: keep API key
-                        default_api_key = current_llm["api_key"]
-                    else:
-                        # Different preset: use default_api_key if provided (e.g., Ollama), otherwise clear
-                        default_api_key = preset_config.get("default_api_key", "")
-                    
-                    default_base_url = preset_config.get("base_url", "")
-                    default_model = preset_config.get("model", "")
-                    
-                    # Show API key URL if available
-                    if preset_config.get("api_key_url"):
-                        st.markdown(f"🔑 [{tr('settings.llm.get_api_key')}]({preset_config['api_key_url']})")
-                else:
-                    # Custom: show current saved config (if any)
+                preset_config = get_preset(selected_preset)
+
+                # If it's the same preset as the saved config, keep the API key;
+                # otherwise use the preset's default_api_key (if any) or clear it.
+                if selected_preset == current_preset:
                     default_api_key = current_llm["api_key"]
-                    default_base_url = current_llm["base_url"]
-                    default_model = current_llm["model"]
-                
+                else:
+                    default_api_key = preset_config.get("default_api_key", "")
+
+                default_base_url = preset_config.get("base_url", "")
+                default_model = preset_config.get("model", "")
+
+                # Show API key URL if available
+                if preset_config.get("api_key_url"):
+                    st.markdown(f"🔑 [{tr('settings.llm.get_api_key')}]({preset_config['api_key_url']})")
+
                 st.markdown("---")
                 
                 # API Key (use unique key to force refresh when switching preset)

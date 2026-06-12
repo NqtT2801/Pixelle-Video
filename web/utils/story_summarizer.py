@@ -11,25 +11,16 @@
 # limitations under the License.
 
 """
-Claude Code CLI helper.
+Story summarizer.
 
-Shells out to the locally installed, logged-in `claude` CLI in print mode so
-features can use the user's Claude Code subscription directly, without an API
-key and without adding a dependency.
+Condenses a first-person life narrative into a title plus an 18-paragraph
+summary using the project's configured LLM (OpenAI gpt-4o by default), via the
+shared OpenAI-SDK LLMService — the same engine the rest of the app uses.
 """
 
-import os
-import shutil
-import subprocess
-import tempfile
 from typing import NamedTuple
 
 from loguru import logger
-
-
-class ClaudeCliError(Exception):
-    """Raised when the `claude` CLI is missing, times out, or exits with an error."""
-    pass
 
 
 class ShortenedStory(NamedTuple):
@@ -48,10 +39,9 @@ class ShortenedStory(NamedTuple):
 # segments come out longer than 5s, raise it if they come out shorter.
 _WORDS_PER_PARAGRAPH = "14 to 18"
 
-# Instruction passed to `claude -p`. The narrative itself is piped via stdin,
-# so long stories are not constrained by command-line length limits. The title
-# is returned on a leading "TITLE:" line so a single plain-text call yields
-# both pieces (structured --json-schema output hangs together with --tools "").
+# Instruction prefix for the LLM. The narrative is appended after this prompt.
+# The title is returned on a leading "TITLE:" line so a single plain-text call
+# yields both pieces.
 #
 # The output feeds a Vietnamese TTS engine (VieNeu): each of the 18 paragraphs is
 # read aloud as one ~5s segment, so the text must be both short-per-paragraph and
@@ -78,18 +68,16 @@ Natural-reading rules (so the TTS voice never stumbles) — apply throughout:
 Output format — follow it EXACTLY and output nothing else:
 - The first line must be `TITLE: ` followed by a short, evocative title (at most ~10 words, same language as the input, no quotes), itself following the natural-reading rules above.
 - Then one empty line.
-- Then the condensed version: exactly 18 paragraphs separated by one empty line, with no heading, labels, quotes or numbering."""
+- Then the condensed version: exactly 18 paragraphs separated by one empty line, with no heading, labels, quotes or numbering.
+
+Here is the narrative to condense:
+"""
 
 _TITLE_PREFIX = "TITLE:"
 
 
-def is_claude_available() -> bool:
-    """Return True if the `claude` CLI is on PATH. Cheap; safe to call per render."""
-    return shutil.which("claude") is not None
-
-
 def _split_title_and_summary(output: str) -> ShortenedStory:
-    """Parse the `TITLE:` first line; the remainder is the 10-paragraph summary."""
+    """Parse the `TITLE:` first line; the remainder is the 18-paragraph summary."""
     text = (output or "").strip()
     title = ""
     summary = text
@@ -101,80 +89,51 @@ def _split_title_and_summary(output: str) -> ShortenedStory:
         summary = (text[newline + 1:].strip() if newline != -1 else "")
 
     if not summary:
-        raise ClaudeCliError("claude returned an empty summary")
+        raise ValueError("The LLM returned an empty summary")
     return ShortenedStory(title=title, summary=summary)
 
 
 def summarize_story(narrative: str, timeout: int = 240) -> ShortenedStory:
     """
-    Condense a first-person life narrative via the Claude Code CLI.
+    Condense a first-person life narrative via the project's configured LLM.
 
-    Runs the logged-in Claude Code subscription (Sonnet, medium effort) and
-    returns a title plus an 18-paragraph summary that preserves the narrator's
-    voice and the input language. Each paragraph is sized to read in ~5s by the
-    VieNeu TTS voice (18 × 5s ≈ 90s) and is sanitized for natural reading
-    (numbers/abbreviations spelled out, no TTS-unfriendly glyphs).
+    Uses the LLM set in Settings (OpenAI gpt-4o by default) through the shared
+    LLMService, and returns a title plus an 18-paragraph summary that preserves
+    the narrator's voice and the input language. Each paragraph is sized to read
+    in ~5s by the VieNeu TTS voice (18 × 5s ≈ 90s) and is sanitized for natural
+    reading (numbers/abbreviations spelled out, no TTS-unfriendly glyphs).
 
     Args:
         narrative: The raw first-person narrative.
-        timeout: Seconds to wait for the CLI before giving up.
+        timeout: Unused; kept for backward compatibility with the previous engine.
 
     Returns:
         A ShortenedStory(title, summary).
 
     Raises:
-        ClaudeCliError: if the CLI is missing, times out, or fails.
+        RuntimeError: if the LLM call fails.
+        ValueError: if the response is empty or unparseable.
     """
-    claude = shutil.which("claude")
-    if not claude:
-        raise ClaudeCliError("claude-not-found")
+    # Import lazily so importing this module never pulls in heavy deps eagerly.
+    from pixelle_video.services.llm_service import LLMService
+    from web.utils.async_helpers import run_async
 
-    # Strip ANTHROPIC_API_KEY so the call always uses the subscription OAuth
-    # login, never pay-per-token API billing.
-    env = os.environ.copy()
-    env.pop("ANTHROPIC_API_KEY", None)
+    full_prompt = f"{_SUMMARIZE_PROMPT}\n\n{narrative}"
 
-    cmd = [
-        claude, "-p", _SUMMARIZE_PROMPT,
-        "--model", "sonnet",            # latest Sonnet
-        "--effort", "medium",           # explicit, as requested
-        "--output-format", "text",
-        "--tools", "",                  # pure text generation, no tool/file access
-        "--strict-mcp-config",          # do not load any MCP servers
-        "--disable-slash-commands",
-        "--no-session-persistence",
-    ]
-
-    # Hide the console window that would otherwise flash on Windows; 0 on POSIX.
-    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    # LLMService reads api_key/base_url/model dynamically from config_manager,
+    # so it always uses whatever is configured in Settings (OpenAI gpt-4o).
+    service = LLMService({})
 
     try:
-        # Run in a throwaway directory so no project CLAUDE.md, hooks, or
-        # settings are picked up — the call stays deterministic.
-        with tempfile.TemporaryDirectory() as workdir:
-            proc = subprocess.run(
-                cmd,
-                input=narrative,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=timeout,
-                cwd=workdir,
-                env=env,
-                creationflags=creation_flags,
-            )
-    except subprocess.TimeoutExpired:
-        raise ClaudeCliError(f"claude timed out after {timeout}s")
-    except OSError as e:
-        raise ClaudeCliError(str(e))
+        # max_tokens generous: 18 short paragraphs + title; Vietnamese is
+        # token-heavy, so leave headroom to avoid truncation.
+        text = run_async(service(full_prompt, temperature=0.7, max_tokens=3000))
+    except Exception as e:
+        logger.error(f"LLM summarization failed: {e}")
+        raise RuntimeError(str(e))
 
-    if proc.returncode != 0:
-        err = (proc.stderr or "").strip() or f"claude exited with code {proc.returncode}"
-        logger.error(f"claude CLI failed: {err}")
-        raise ClaudeCliError(err)
-
-    summary_text = (proc.stdout or "").strip()
+    summary_text = (text or "").strip()
     if not summary_text:
-        raise ClaudeCliError("claude returned an empty response")
+        raise ValueError("The LLM returned an empty response")
 
     return _split_title_and_summary(summary_text)

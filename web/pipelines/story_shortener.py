@@ -26,7 +26,7 @@ import streamlit as st
 
 from web.i18n import tr
 from web.pipelines.base import PipelineUI, register_pipeline_ui
-from web.utils.claude_cli import is_claude_available, summarize_story
+from web.utils.story_summarizer import summarize_story
 from web.utils.streamlit_helpers import render_copy_button
 
 
@@ -49,9 +49,10 @@ class StoryShortenerPipelineUI(PipelineUI):
         return tr("pipeline.story_shortener.description")
 
     def render(self, pixelle_video: Any):
-        # pixelle_video is unused — this tab is a standalone text tool.
-        if not is_claude_available():
-            st.warning(tr("story_shortener.no_claude"))
+        # pixelle_video is unused — this tab drives the configured LLM directly.
+        from pixelle_video.config import config_manager
+        if not config_manager.config.is_llm_configured():
+            st.warning(tr("story_shortener.no_llm"))
 
         left_col, right_col = st.columns([1, 1])
 

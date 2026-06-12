@@ -522,17 +522,22 @@ class TTSService(ComfyBaseService):
         engine = VieNeuEngine()
         out_wav = f"{output_path}.vieneu.wav"
 
-        # Pin the preset speaker so every segment of a video sounds identical. VieNeu's
-        # sampler is stochastic/unseeded, so independent calls occasionally drift to a
-        # different-sounding voice. A fixed seed + lower temperature keep it consistent.
-        # (0.4 is VieNeu's own `turbo.py` default; None would use the 0.8 package default.)
+        # Keep every segment of a video on the same preset speaker. VieNeu's preset timbre
+        # is anchored, so drift comes only from the autoregressive sampler. Lowering the
+        # temperature (VieNeu's 0.8 default -> 0.2) measurably tightens it, and
+        # vieneu_temperature=0 is fully deterministic (greedy). top_k/top_p stay at VieNeu's
+        # defaults (25/0.95): narrowing them too far starves the sampler and can cause
+        # runaway generation (a segment that never reaches EOS), so prefer temperature.
         local_cfg = self.config.get("local", {})
-        temperature = local_cfg.get("vieneu_temperature", 0.4)
+        temperature = local_cfg.get("vieneu_temperature", 0.2)
+        top_k = local_cfg.get("vieneu_top_k", 25)
+        top_p = local_cfg.get("vieneu_top_p", 0.95)
         seed = local_cfg.get("vieneu_seed", 1234)
         try:
             # Blocking ONNX inference -> run in a thread
             await asyncio.to_thread(
-                engine.synthesize, text, voice_id, out_wav, temperature, seed
+                engine.synthesize, text, voice_id, out_wav,
+                temperature=temperature, seed=seed, top_k=top_k, top_p=top_p,
             )
 
             # Transcode 48kHz wav -> mp3, adjusting tempo if speed != 1.0

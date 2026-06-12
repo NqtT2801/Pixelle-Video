@@ -21,41 +21,10 @@ from typing import Dict, Any, List
 
 LLM_PRESETS: List[Dict[str, Any]] = [
     {
-        "name": "Qwen",
-        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "model": "qwen-max",
-        "api_key_url": "https://bailian.console.aliyun.com/?tab=model#/api-key",
-    },
-    {
         "name": "OpenAI",
         "base_url": "https://api.openai.com/v1",
         "model": "gpt-4o",
         "api_key_url": "https://platform.openai.com/api-keys",
-    },
-    {
-        "name": "Claude",
-        "base_url": "https://api.anthropic.com/v1/",
-        "model": "claude-sonnet-4-5",
-        "api_key_url": "https://console.anthropic.com/settings/keys",
-    },
-    {
-        "name": "DeepSeek",
-        "base_url": "https://api.deepseek.com",
-        "model": "deepseek-chat",
-        "api_key_url": "https://platform.deepseek.com/api_keys",
-    },
-    {
-        "name": "Ollama",
-        "base_url": "http://localhost:11434/v1",
-        "model": "llama3.2",
-        "api_key_url": "https://ollama.com/download",
-        "default_api_key": "ollama",  # Required by OpenAI SDK but ignored by Ollama
-    },
-    {
-        "name": "Moonshot",
-        "base_url": "https://api.moonshot.cn/v1",
-        "model": "moonshot-v1-8k",
-        "api_key_url": "https://platform.moonshot.cn/console/api-keys",
     },
 ]
 
