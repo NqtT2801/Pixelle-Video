@@ -13,9 +13,10 @@
 """
 Story summarizer.
 
-Condenses a first-person life narrative into a title plus an 18-paragraph
-summary using the project's configured LLM (OpenAI gpt-4o by default), via the
-shared OpenAI-SDK LLMService — the same engine the rest of the app uses.
+Condenses a first-person life narrative into a sensational clickbait hook title
+plus 15 narrative paragraphs, using the project's configured LLM (OpenAI gpt-4o
+by default) via the shared OpenAI-SDK LLMService. The hook is prepended as the
+first paragraph, so the spoken output is exactly 16 paragraphs (hook + 15).
 """
 
 from typing import NamedTuple
@@ -24,10 +25,12 @@ from loguru import logger
 
 
 class ShortenedStory(NamedTuple):
-    """A shortened narrative: an AI-suggested title and the 18-paragraph summary.
+    """A shortened narrative: a clickbait hook title and the 16-paragraph summary.
 
-    The summary is split into EXACTLY 18 short paragraphs so that, downstream,
-    Quick Create turns each paragraph into one ~5s video segment (18 × 5s ≈ 90s).
+    The hook is prepended as the first paragraph, so the summary is EXACTLY 16
+    short paragraphs (hook + 15 narrative). Downstream, Quick Create turns each
+    paragraph into one ~5s video segment (16 × ~5s ≈ 80s), the first of which
+    speaks the hook. `title` holds the same hook for use as the on-screen title.
     """
     title: str
     summary: str
@@ -43,7 +46,7 @@ _WORDS_PER_PARAGRAPH = "14 to 18"
 # The title is returned on a leading "TITLE:" line so a single plain-text call
 # yields both pieces.
 #
-# The output feeds a Vietnamese TTS engine (VieNeu): each of the 18 paragraphs is
+# The output feeds a Vietnamese TTS engine (VieNeu): each of the 16 paragraphs is
 # read aloud as one ~5s segment, so the text must be both short-per-paragraph and
 # free of glyphs/abbreviations a TTS would mangle.
 _SUMMARIZE_PROMPT = f"""You will receive a person's first-person narrative recounting their life circumstances and story.
@@ -51,10 +54,10 @@ _SUMMARIZE_PROMPT = f"""You will receive a person's first-person narrative recou
 The result will be read aloud, paragraph by paragraph, by a Vietnamese text-to-speech voice, where each paragraph becomes one short (~5 second) video segment. Rewrite the narrative as a condensed version optimized for that.
 
 Structure rules:
-- Output EXACTLY 18 paragraphs, separated by a single blank line, with the story distributed evenly across all 18.
+- Output EXACTLY 15 paragraphs, separated by a single blank line, with the story distributed evenly across all 15. (A separate clickbait title is requested below; do not count it here.)
 - Each paragraph must be roughly {_WORDS_PER_PARAGRAPH} words (about a single spoken line, ~5 seconds aloud); never exceed 20 words and never go below 12.
 - Stay in the first person and preserve the narrator's original voice, tone and emotion — do not turn it into a neutral report.
-- Each paragraph must be self-contained and natural to read aloud on its own, yet the 18 paragraphs together must flow as one coherent, easy-to-follow story.
+- Each paragraph must be self-contained and natural to read aloud on its own, yet the 15 paragraphs together must flow as one coherent, easy-to-follow story.
 - Keep the essential events, emotions and circumstances; remove only repetition and minor detail.
 - Write in the SAME language as the input narrative.
 
@@ -66,9 +69,9 @@ Natural-reading rules (so the TTS voice never stumbles) — apply throughout:
 - Avoid hard-to-pronounce clusters and ambiguous shorthand; prefer common, plainly spoken phrasing.
 
 Output format — follow it EXACTLY and output nothing else:
-- The first line must be `TITLE: ` followed by a short, evocative title (at most ~10 words, same language as the input, no quotes), itself following the natural-reading rules above.
+- The first line must be `TITLE: ` followed by a sensational, scroll-stopping clickbait hook that grabs the viewer in the first second — open a strong curiosity gap or strike a raw emotion (shock, outrage, heartbreak, disbelief). You MAY tease or exaggerate to maximize clicks. Keep it to one punchy spoken line (at most ~14 words), in the SAME language as the input, no quotes. This hook is SPOKEN as the very first segment, so it must obey the natural-reading rules above and read aloud cleanly.
 - Then one empty line.
-- Then the condensed version: exactly 18 paragraphs separated by one empty line, with no heading, labels, quotes or numbering.
+- Then the condensed version: exactly 15 paragraphs separated by one empty line, with no heading, labels, quotes or numbering.
 
 Here is the narrative to condense:
 """
@@ -77,19 +80,30 @@ _TITLE_PREFIX = "TITLE:"
 
 
 def _split_title_and_summary(output: str) -> ShortenedStory:
-    """Parse the `TITLE:` first line; the remainder is the 18-paragraph summary."""
+    """Parse the `TITLE:` line and build the 16-paragraph summary.
+
+    The clickbait title is prepended as the first paragraph of the summary, so the
+    spoken output is exactly 16 paragraphs (the hook + the 15 narrative paragraphs)
+    and the very first segment is the hook. `title` is still returned separately so
+    the same hook can also be used as the on-screen video title.
+    """
     text = (output or "").strip()
     title = ""
-    summary = text
+    body = text
 
     newline = text.find("\n")
     first_line = text if newline == -1 else text[:newline]
     if first_line.strip().upper().startswith(_TITLE_PREFIX):
         title = first_line.split(":", 1)[1].strip().strip('"').strip("'").strip()
-        summary = (text[newline + 1:].strip() if newline != -1 else "")
+        body = (text[newline + 1:].strip() if newline != -1 else "")
 
-    if not summary:
+    if not body:
         raise ValueError("The LLM returned an empty summary")
+
+    # Prepend the hook as the first paragraph so the spoken output is exactly 16
+    # paragraphs (hook + 15) and segment one is the hook. If the model omitted the
+    # TITLE line, fall back to the body as-is.
+    summary = f"{title}\n\n{body}" if title else body
     return ShortenedStory(title=title, summary=summary)
 
 
@@ -98,10 +112,11 @@ def summarize_story(narrative: str, timeout: int = 240) -> ShortenedStory:
     Condense a first-person life narrative via the project's configured LLM.
 
     Uses the LLM set in Settings (OpenAI gpt-4o by default) through the shared
-    LLMService, and returns a title plus an 18-paragraph summary that preserves
-    the narrator's voice and the input language. Each paragraph is sized to read
-    in ~5s by the VieNeu TTS voice (18 × 5s ≈ 90s) and is sanitized for natural
-    reading (numbers/abbreviations spelled out, no TTS-unfriendly glyphs).
+    LLMService, and returns a clickbait hook title plus a 16-paragraph summary
+    (the hook prepended as the first paragraph + 15 narrative paragraphs) that
+    preserves the narrator's voice and the input language. Each paragraph is sized
+    to read in ~5s by the VieNeu TTS voice (16 × ~5s ≈ 80s) and is sanitized for
+    natural reading (numbers/abbreviations spelled out, no TTS-unfriendly glyphs).
 
     Args:
         narrative: The raw first-person narrative.
@@ -125,7 +140,7 @@ def summarize_story(narrative: str, timeout: int = 240) -> ShortenedStory:
     service = LLMService({})
 
     try:
-        # max_tokens generous: 18 short paragraphs + title; Vietnamese is
+        # max_tokens generous: 16 short paragraphs (title + 15); Vietnamese is
         # token-heavy, so leave headroom to avoid truncation.
         text = run_async(service(full_prompt, temperature=0.7, max_tokens=3000))
     except Exception as e:

@@ -46,6 +46,7 @@ originals were produced — only `vieneu_seed` / `vieneu_temperature` change per
 import argparse
 import asyncio
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -90,6 +91,7 @@ def _load_run(run_dir: Path, seg_num: int):
         "bgm_volume": inp.get("bgm_volume", 0.2),
         "bgm_mode": inp.get("bgm_mode", "loop"),
         "fps": inp.get("video_fps", 30),
+        "frame_template": inp.get("frame_template"),
         "frame_index": frame_index,
     }
 
@@ -111,8 +113,11 @@ def _tts_service(voice: str, speed: float) -> TTSService:
     return TTSService(config, core=None)
 
 
+_KIND_EXT = {"audio": "mp3", "video": "mp4", "composed": "png", "segment": "mp4"}
+
+
 def _seg(run_dir: Path, seg_num: int, kind: str) -> Path:
-    return run_dir / "frames" / f"{seg_num:02d}_{kind}.{'mp3' if kind == 'audio' else 'mp4' if kind == 'segment' else 'png'}"
+    return run_dir / "frames" / f"{seg_num:02d}_{kind}.{_KIND_EXT[kind]}"
 
 
 # --------------------------------------------------------------------------- #
@@ -192,8 +197,42 @@ def _apply(run_dir: Path, seg_num: int, chosen: Path):
     shutil.copy2(chosen, audio)
     logger.info(f"installed chosen take -> {audio.name}")
 
-    # 2) Rebuild this frame's video segment (static composed image + new narration).
-    vs.create_video_from_image(image=str(composed), audio=str(audio), output=str(segment), fps=info["fps"])
+    # 2) Rebuild this frame's video segment exactly as the pipeline does
+    # (FrameProcessor._step_create_video_segment): a video-media frame composites the
+    # animated clip into the template's video window (or full-frame) with the RGBA overlay
+    # on top, then merges narration; an image-media frame is a static composed image + audio.
+    video = _seg(run_dir, seg_num, "video")
+    if video.exists():
+        from pixelle_video.utils.template_util import (
+            parse_template_video_region, resolve_template_path, parse_template_size,
+        )
+        overlay_tmp = str(segment.with_name(f"{seg_num:02d}_overlay_tmp.mp4"))
+        region, tpl = None, None
+        if info.get("frame_template"):
+            tpl = resolve_template_path(info["frame_template"])
+            region = parse_template_video_region(tpl)
+        if region:
+            vs.composite_video_in_region(
+                video=str(video), overlay_image=str(composed), output=overlay_tmp,
+                region=region, canvas_size=parse_template_size(tpl),
+                bg_color=region.get("bg_color", "#000000"), fps=info["fps"],
+            )
+        else:
+            vs.overlay_image_on_video(
+                video=str(video), overlay_image=str(composed),
+                output=overlay_tmp, scale_mode="contain",
+            )
+        vs.merge_audio_video(
+            video=overlay_tmp, audio=str(audio), output=str(segment),
+            replace_audio=True, audio_volume=1.0,
+        )
+        if os.path.exists(overlay_tmp):
+            try:
+                os.remove(overlay_tmp)
+            except OSError:
+                pass
+    else:
+        vs.create_video_from_image(image=str(composed), audio=str(audio), output=str(segment), fps=info["fps"])
     logger.info(f"rebuilt {segment.name}")
 
     # 3) Re-concatenate all segments (+ same BGM) into a `(fixed)` final video.

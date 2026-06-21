@@ -14,10 +14,11 @@
 Story Shortener Pipeline UI
 
 A standalone text tool: paste a person's first-person life narrative and the
-Claude Code subscription condenses it into a title plus a coherent 18-paragraph
-summary, where each paragraph is sized to be read in ~5s by the VieNeu TTS voice
-(18 × 5s ≈ a 90s video) and sanitized for natural reading. It preserves the
-narrator's original voice.
+configured LLM condenses it into a sensational clickbait hook title plus 15
+narrative paragraphs — 16 paragraphs total, with the hook spoken first. Each
+paragraph is sized to be read in ~5s by the VieNeu TTS voice (16 × ~5s ≈ an 80s
+video) and sanitized for natural reading. It preserves the narrator's original
+voice.
 """
 
 from typing import Any
@@ -91,7 +92,7 @@ class StoryShortenerPipelineUI(PipelineUI):
                                 st.rerun()
 
         # ====================================================================
-        # Right Column: Title + shortened 10-paragraph result (editable)
+        # Right Column: Title + shortened 16-paragraph result (editable)
         # ====================================================================
         with right_col:
             with st.container(border=True):
@@ -112,7 +113,7 @@ class StoryShortenerPipelineUI(PipelineUI):
                     st.caption(
                         tr("story_shortener.word_count", count=len(edited.split()))
                     )
-                    # Copy button copies the (edited) 10-paragraph summary only.
+                    # Copy button copies the (edited) 16-paragraph summary only.
                     render_copy_button(
                         edited,
                         tr("story_shortener.copy_btn"),
