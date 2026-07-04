@@ -46,6 +46,12 @@ config.yaml.bak
 *.yaml.bak
 .env
 
+# Google Cloud service-account key (do NOT commit)
+gcloud-key.json
+*-service-account*.json
+*service_account*.json
+credentials/
+
 # Logs
 *.log
 

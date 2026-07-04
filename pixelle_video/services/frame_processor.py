@@ -214,7 +214,13 @@ class FrameProcessor:
             "output_path": output_path,
             "index": frame.index + 1,  # 1-based index for workflow
         }
-        
+
+        # The first segment is the title/hook — ask the prosody layer to deliver it
+        # with extra punch (slower + brighter + dramatic trailing pause) to grab the
+        # viewer in the first second. Ignored by engines that don't use it.
+        if frame.index == 0:
+            tts_params["emphasis"] = "title"
+
         if config.tts_inference_mode == "local":
             # Local mode: pass voice and speed
             if config.voice_id:

@@ -16,7 +16,7 @@ Configuration schema with Pydantic models
 Single source of truth for all configuration defaults and validation.
 """
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LLMConfig(BaseModel):
@@ -27,9 +27,18 @@ class LLMConfig(BaseModel):
 
 
 class TTSLocalConfig(BaseModel):
-    """Local TTS configuration (Edge TTS)"""
-    voice: str = Field(default="zh-CN-YunjianNeural", description="Edge TTS voice ID")
-    speed: float = Field(default=1.2, ge=0.5, le=2.0, description="Speech speed multiplier (0.5-2.0)")
+    """Local TTS configuration.
+
+    ``extra='allow'`` so optional per-engine knobs set under ``comfyui.tts.local``
+    in config.yaml (e.g. ``gcloud_*`` / ``prosody_*`` / ``vieneu_*`` / ``target_lufs``)
+    survive ConfigManager's ``model_dump()`` round-trip (service.py reads
+    ``self.config`` which is ``config.to_dict()``) and reach the TTS service.
+    Without this, Pydantic's default ``extra='ignore'`` silently drops them.
+    """
+    model_config = ConfigDict(extra="allow")
+
+    voice: str = Field(default="gcloud:vi-VN-Wavenet-D", description="Voice ID (gcloud:/vieneu:/clone: prefix, or Edge TTS id)")
+    speed: float = Field(default=1.4, ge=0.5, le=2.0, description="Speech speed multiplier (0.5-2.0). Default 1.4 = brisk/energetic, paired with denser Story Shortener paragraphs to keep ~5s segments")
 
 
 class TTSComfyUIConfig(BaseModel):
@@ -75,6 +84,11 @@ class ComfyUIConfig(BaseModel):
     runninghub_api_key: Optional[str] = Field(default=None, description="RunningHub API Key (optional)")
     runninghub_concurrent_limit: int = Field(default=1, ge=1, le=10, description="RunningHub concurrent execution limit (1-10)")
     runninghub_instance_type: Optional[str] = Field(default=None, description="RunningHub instance type (optional, set to 'plus' for 48GB VRAM)")
+    media_max_retries: int = Field(
+        default=2, ge=0, le=5,
+        description="Max retry attempts for a failed media generation, per frame. "
+                    "0 disables retry. Each retry creates a new RunningHub task (uses credits).",
+    )
     tts: TTSSubConfig = Field(default_factory=TTSSubConfig, description="TTS-specific configuration")
     image: ImageSubConfig = Field(default_factory=ImageSubConfig, description="Image-specific configuration")
     video: VideoSubConfig = Field(default_factory=VideoSubConfig, description="Video-specific configuration")

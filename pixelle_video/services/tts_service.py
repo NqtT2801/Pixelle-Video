@@ -24,7 +24,9 @@ from loguru import logger
 
 from pixelle_video.services.comfy_base_service import ComfyBaseService
 from pixelle_video.utils.tts_util import edge_tts
-from pixelle_video.tts_voices import speed_to_rate, resolve_custom_voice, resolve_vieneu_voice
+from pixelle_video.tts_voices import (
+    speed_to_rate, resolve_custom_voice, resolve_vieneu_voice, resolve_gcloud_voice,
+)
 
 
 class TTSService(ComfyBaseService):
@@ -76,6 +78,8 @@ class TTSService(ComfyBaseService):
         inference_mode: Optional[str] = None,
         # Output path
         output_path: Optional[str] = None,
+        # First-segment/title delivery hint (e.g. "title") for the prosody layer
+        emphasis: Optional[str] = None,
         **params
     ) -> str:
         """
@@ -120,12 +124,20 @@ class TTSService(ComfyBaseService):
                 text=text,
                 voice=voice,
                 speed=speed,
-                output_path=output_path
+                output_path=output_path,
+                emphasis=emphasis,
             )
             # Normalize loudness so every voice (clones + Edge) is at the same
             # standard level (F5 otherwise tracks each reference clip's loudness).
             target_lufs = self.config.get("local", {}).get("target_lufs", -16.0)
-            return await self._normalize_loudness(result_path, target_lufs)
+            leveled = await self._normalize_loudness(result_path, target_lufs)
+            # Trim the leading/trailing dead air from the clip (keeping a small tail)
+            # so that when the per-paragraph segments are concatenated downstream the
+            # narration flows continuously instead of pausing at every segment
+            # boundary. Done LAST so the returned file — the one frame_processor
+            # measures for duration — is the tight one, keeping the audio, the
+            # generated video clip and the final segment all the same length.
+            return await self._trim_silence_if_enabled(leveled)
         else:  # comfyui
             # 1. Resolve workflow (returns structured info)
             workflow_info = self._resolve_workflow(workflow=workflow)
@@ -223,12 +235,97 @@ class TTSService(ComfyBaseService):
                     pass
         return path
 
+    @staticmethod
+    def _build_trim_filter(threshold_db: float, lead_ms: int, trail_ms: int) -> str:
+        """Build the ffmpeg ``-af`` filter that trims edge silence, keeping a small pad.
+
+        ``silenceremove`` only trims from the *start* of a stream, so we trim the
+        head, ``areverse`` to bring the tail to the front, trim that, then
+        ``areverse`` back. ``start_silence`` keeps that many seconds of the silence
+        before the first detected sound — i.e. the lead/trail pad we deliberately
+        preserve so words never clip and a tiny natural breath remains between
+        segments. ``detection=peak`` tracks short speech edges more reliably than RMS.
+        """
+        lead_s = max(0, int(lead_ms)) / 1000.0
+        trail_s = max(0, int(trail_ms)) / 1000.0
+        head = (
+            f"silenceremove=start_periods=1:start_silence={lead_s:.3f}"
+            f":start_threshold={threshold_db}dB:detection=peak"
+        )
+        tail = (
+            f"silenceremove=start_periods=1:start_silence={trail_s:.3f}"
+            f":start_threshold={threshold_db}dB:detection=peak"
+        )
+        return f"{head},areverse,{tail},areverse"
+
+    def _trim_edge_silence(
+        self, path: str, *, threshold_db: float, lead_ms: int, trail_ms: int
+    ) -> str:
+        """Trim leading/trailing silence from an mp3 in place (best-effort).
+
+        Keeps ~``lead_ms`` at the head and ~``trail_ms`` at the tail so speech never
+        clips and a small natural breath remains. On any ffmpeg error the original
+        file is left untouched. Returns ``path`` either way.
+        """
+        import subprocess
+
+        af = self._build_trim_filter(threshold_db, lead_ms, trail_ms)
+        tmp = f"{path}.trim.mp3"
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", path, "-af", af,
+                 "-ar", "44100", "-loglevel", "error", tmp],
+                check=True, capture_output=True, text=True,
+            )
+            os.replace(tmp, path)
+        except Exception as e:
+            logger.warning(f"Silence trim skipped ({e}); keeping original")
+        finally:
+            try:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
+            except OSError:
+                pass
+        return path
+
+    async def _trim_silence_if_enabled(self, path: str) -> str:
+        """Trim edge silence per the ``comfyui.tts.local`` config (default on).
+
+        Knobs (all optional; defaults applied here so they work even when absent from
+        config.yaml — ``TTSLocalConfig`` has ``extra='allow'``):
+          - ``trim_silence`` (bool, default True): master switch.
+          - ``trim_silence_threshold_db`` (default -45): level below which audio is
+            treated as silence.
+          - ``trim_lead_ms`` (default 50) / ``trim_trail_ms`` (default 120): pad kept
+            at the head / tail.
+
+        Removing the dead air at each clip's edges lets the concatenated per-paragraph
+        segments play as one continuous narration (no focus-breaking pause between
+        segments), while the small kept tail preserves a natural rhythm.
+        """
+        import asyncio
+
+        local_cfg = self.config.get("local", {})
+        if not local_cfg.get("trim_silence", True):
+            return path
+        threshold_db = local_cfg.get("trim_silence_threshold_db", -45)
+        lead_ms = local_cfg.get("trim_lead_ms", 50)
+        trail_ms = local_cfg.get("trim_trail_ms", 120)
+        return await asyncio.to_thread(
+            self._trim_edge_silence,
+            path,
+            threshold_db=threshold_db,
+            lead_ms=lead_ms,
+            trail_ms=trail_ms,
+        )
+
     async def _call_local_tts(
         self,
         text: str,
         voice: Optional[str] = None,
         speed: Optional[float] = None,
         output_path: Optional[str] = None,
+        emphasis: Optional[str] = None,
     ) -> str:
         """
         Generate speech using local Edge TTS
@@ -260,6 +357,11 @@ class TTSService(ComfyBaseService):
 
             # Ensure output directory exists
             Path("output").mkdir(parents=True, exist_ok=True)
+
+        # Google Cloud TTS (cloud neural, SSML prosody) — the active voiceover engine.
+        gcloud = resolve_gcloud_voice(final_voice)
+        if gcloud:
+            return await self._call_gcloud(text, gcloud, final_speed, output_path, emphasis)
 
         # VieNeu preset voice: self-contained Vietnamese named-voice engine (no ref clip).
         vieneu = resolve_vieneu_voice(final_voice)
@@ -297,6 +399,81 @@ class TTSService(ComfyBaseService):
         except Exception as e:
             logger.error(f"Local TTS generation error: {e}")
             raise
+
+    async def _call_gcloud(
+        self,
+        text: str,
+        gcloud: dict,
+        speed: float,
+        output_path: str,
+        emphasis: Optional[str] = None,
+    ) -> str:
+        """
+        Generate speech with Google Cloud TTS (cloud neural).
+
+        Two delivery paths, chosen by the voice family so the voice never sounds monotone:
+        - **WaveNet/Standard**: expressive SSML built by the prosody layer (rise/fall,
+          keyword emphasis, dramatic breaks; a distinct hook delivery when
+          ``emphasis == "title"``).
+        - **Chirp3-HD**: plain text (these voices ignore SSML) — their own neural delivery
+          carries the rise/fall. The title hook gets gravitas from a slightly slower
+          speaking rate instead of SSML, and pitch is omitted (unsupported by Chirp3-HD).
+
+        The same server voice is used for every segment, so there is no per-segment drift.
+        """
+        import asyncio
+
+        from pixelle_video.services.gcloud_tts_service import GCloudTTSEngine
+        from pixelle_video.services.prosody import (
+            build_ssml, plain_text, prosody_settings_from_config,
+        )
+        from pixelle_video.tts_voices import gcloud_voice_supports_ssml
+
+        voice_name = gcloud["voice_id"]
+        local_cfg = self.config.get("local", {})
+        is_title = emphasis == "title"
+
+        credentials_path = local_cfg.get("gcloud_credentials")  # optional; else env ADC
+        language_code = local_cfg.get("gcloud_language_code", "vi-VN")
+        # The speed slider is the global AudioConfig multiplier (default 1.0 = no change).
+        speaking_rate = max(0.25, min(4.0, speed if speed else 1.0))
+
+        if gcloud_voice_supports_ssml(voice_name):
+            # WaveNet/Standard: prosody lives in the SSML; pitch stays neutral.
+            settings = prosody_settings_from_config(local_cfg)
+            content = build_ssml(text, is_title=is_title, settings=settings)
+            is_ssml = True
+            pitch = 0.0
+        else:
+            # Chirp3-HD: plain text, no SSML, no pitch control. Give the title hook a
+            # touch of gravitas by slowing it slightly (configurable).
+            content = plain_text(text)
+            is_ssml = False
+            pitch = None
+            if is_title:
+                title_scale = float(local_cfg.get("gcloud_title_rate_scale", 0.96))
+                speaking_rate = max(0.25, min(4.0, speaking_rate * title_scale))
+
+        logger.info(
+            f"🗣️  Google Cloud TTS '{voice_name}'"
+            f"{' [title hook]' if is_title else ''} "
+            f"({'ssml' if is_ssml else 'text'}, rate={speaking_rate:.2f}x)"
+        )
+
+        engine = GCloudTTSEngine()
+        await asyncio.to_thread(
+            engine.synthesize,
+            content,
+            voice_name,
+            output_path,
+            is_ssml=is_ssml,
+            language_code=language_code,
+            speaking_rate=speaking_rate,
+            pitch=pitch,
+            credentials_path=credentials_path,
+        )
+        logger.info(f"✅ Generated audio (Google Cloud TTS): {output_path}")
+        return output_path
 
     async def _call_f5tts(
         self,

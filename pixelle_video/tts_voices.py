@@ -32,6 +32,8 @@ VOICES_DIR = "voices"
 CLONE_VOICE_PREFIX = "clone:"
 # VieNeu-TTS preset voices are selected by id (see VIENEU_VOICES below).
 VIENEU_VOICE_PREFIX = "vieneu:"
+# Google Cloud TTS voices are selected by id "gcloud:<google_voice_name>" (see GCLOUD_VOICES below).
+GCLOUD_VOICE_PREFIX = "gcloud:"
 # Northern Vietnamese male Edge voice used to drive pronunciation/prosody before
 # the timbre is converted to the reference clip.
 DEFAULT_CLONE_BASE = "vi-VN-NamMinhNeural"
@@ -254,15 +256,33 @@ VIENEU_VOICES: List[Dict[str, Any]] = [
 ]
 
 
-# Voices offered for selection in the "Voiceover" (section.tts) UI sections.
-# Curated subset of VIENEU_VOICES — the full registry above is kept intact so any
-# previously-saved voice id still resolves via resolve_vieneu_voice(); only the
-# selectable roster is narrowed here. Order here is the order shown in the dropdown.
-_VOICEOVER_VOICE_IDS = ("vieneu:Ngọc Linh", "vieneu:Đức Trí")
-VOICEOVER_VOICES: List[Dict[str, Any]] = [
-    next(v for v in VIENEU_VOICES if v["id"] == vid)
-    for vid in _VOICEOVER_VOICE_IDS
+# ---------------------------------------------------------------------------
+# Google Cloud TTS voices (cloud neural, Northern Vietnamese)
+# ---------------------------------------------------------------------------
+# Selected by id "gcloud:<google_voice_name>" and synthesized by
+# `pixelle_video.services.gcloud_tts_service.GCloudTTSEngine`. Two families:
+# - Chirp3-HD (PRIMARY): modern generative voices, lively/dynamic delivery from PLAIN
+#   TEXT (they ignore SSML). Default — WaveNet+SSML came out too flat/đều đều.
+# - WaveNet (FALLBACK): driven by the SSML prosody layer (`pixelle_video.services.prosody`,
+#   <prosody>/<emphasis>/<break>). Kept selectable for comparison.
+# The synthesis path is chosen automatically via `gcloud_voice_supports_ssml()`.
+# `voice_id` is the Google voice name passed to the API; `name` is the UI label.
+GCLOUD_VOICES: List[Dict[str, Any]] = [
+    # Chirp3-HD — auditioned & chosen 2026-06-22 (Northern male + female).
+    {"id": "gcloud:vi-VN-Chirp3-HD-Enceladus", "voice_id": "vi-VN-Chirp3-HD-Enceladus", "name": "Nam miền Bắc (Google Chirp3-HD)", "locale": "vi-VN", "gender": "male"},
+    {"id": "gcloud:vi-VN-Chirp3-HD-Despina", "voice_id": "vi-VN-Chirp3-HD-Despina", "name": "Nữ miền Bắc (Google Chirp3-HD)", "locale": "vi-VN", "gender": "female"},
+    # WaveNet — SSML fallback (kept for comparison).
+    {"id": "gcloud:vi-VN-Wavenet-D", "voice_id": "vi-VN-Wavenet-D", "name": "Nam miền Bắc (Google WaveNet)", "locale": "vi-VN", "gender": "male"},
+    {"id": "gcloud:vi-VN-Wavenet-C", "voice_id": "vi-VN-Wavenet-C", "name": "Nữ miền Bắc (Google WaveNet)", "locale": "vi-VN", "gender": "female"},
 ]
+
+
+# Voices offered for selection in the "Voiceover" (section.tts) UI sections.
+# The Google Cloud neural voices (Chirp3-HD primary + WaveNet fallback, Northern,
+# male+female) are the active voiceover engine. The VieNeu presets above stay registered so any previously-saved
+# `vieneu:` id still resolves via resolve_vieneu_voice(), but they are no longer in
+# the picker. Order here is the order shown in the dropdown.
+VOICEOVER_VOICES: List[Dict[str, Any]] = list(GCLOUD_VOICES)
 
 
 def list_custom_voices() -> List[Dict[str, Any]]:
@@ -326,6 +346,32 @@ def resolve_vieneu_voice(voice_id: Optional[str]) -> Optional[Dict[str, Any]]:
     return next((v for v in VIENEU_VOICES if v["id"] == voice_id), None)
 
 
+def resolve_gcloud_voice(voice_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """
+    Return the Google Cloud TTS voice config for a ``gcloud:<name>`` id, or None if
+    the id is not a Google Cloud voice (e.g. a VieNeu, cloned, or Edge voice).
+    """
+    if not voice_id or not voice_id.startswith(GCLOUD_VOICE_PREFIX):
+        return None
+    return next((v for v in GCLOUD_VOICES if v["id"] == voice_id), None)
+
+
+# Google voice families that do NOT support SSML — they ignore <prosody>/<emphasis>/
+# <break> and must be fed plain text. Everything else (WaveNet/Standard/Neural2) does.
+_NON_SSML_GCLOUD_MARKERS = ("chirp", "journey")
+
+
+def gcloud_voice_supports_ssml(voice_name: str) -> bool:
+    """True if a Google voice renders SSML; False for Chirp3-HD/Journey (plain text only).
+
+    ``voice_name`` is the bare Google voice id (e.g. ``vi-VN-Wavenet-D`` or
+    ``vi-VN-Chirp3-HD-Aoede``), not the ``gcloud:`` prefixed id. Detection is by name
+    family so voices added later are classified correctly without a registry change.
+    """
+    name = (voice_name or "").lower()
+    return not any(marker in name for marker in _NON_SSML_GCLOUD_MARKERS)
+
+
 def get_voice_display_name(voice_id: str, tr_func=None, locale: str = "zh_CN") -> str:
     """
     Get display name for voice
@@ -342,6 +388,11 @@ def get_voice_display_name(voice_id: str, tr_func=None, locale: str = "zh_CN") -
     custom = resolve_custom_voice(voice_id)
     if custom:
         return custom["name"]
+
+    # Google Cloud TTS voices: show their friendly Vietnamese name
+    gcloud = resolve_gcloud_voice(voice_id)
+    if gcloud:
+        return gcloud["name"]
 
     # VieNeu preset voices: show their friendly Vietnamese name
     vieneu = resolve_vieneu_voice(voice_id)

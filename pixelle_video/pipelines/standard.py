@@ -263,7 +263,11 @@ class StandardPipeline(LinearVideoPipeline):
             tts_inference_mode=tts_inference_mode or "local",
             voice_id=final_voice_id,
             tts_workflow=final_tts_workflow,
-            tts_speed=ctx.params.get("tts_speed", 1.2),
+            # Brisk default for an energetic pace; paired with denser Story Shortener
+            # paragraphs so each ~5s segment delivers more. UI passes the slider value
+            # (its default comes from comfyui.tts.local.speed = 1.4); this is the
+            # fallback for API callers that omit tts_speed.
+            tts_speed=ctx.params.get("tts_speed", 1.4),
             ref_audio=ctx.params.get("ref_audio"),
             media_width=ctx.params.get("media_width"),
             media_height=ctx.params.get("media_height"),
